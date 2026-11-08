@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#11100f">
+    <meta name="robots" content="noindex, nofollow">
+    <title>Student learning space | TGF Vocational Pathways</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link
+      href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@400;500;600;700;800&display=swap"
+      rel="stylesheet"
+    >
+    <link rel="stylesheet" href="/styles.css">
+    <link rel="stylesheet" href="/admin.css">
+  </head>
+  <body class="admin-page classroom-page">
+    <a class="skip-link" href="#student-main">Skip to learning space</a>
+    <header class="site-header admin-header">
+      <div class="container header-inner">
+        <a class="brand" href="/" aria-label="TGF Vocational Pathways home">
+          <span class="brand-mark">TGF<span>VP</span><i aria-hidden="true">›</i></span>
+          <span class="brand-caption">Student<br>Learning Space</span>
+        </a>
+        <a class="text-link admin-public-link" href="/">Public website <span aria-hidden="true">↗</span></a>
+        <button class="button button-dark admin-sign-out" id="classroom-sign-out" type="button" hidden>Sign out</button>
+      </div>
+    </header>
+    <main class="admin-main container classroom-main" id="student-main">
+      <section id="student-login-panel" class="portal-login" hidden>
+        <p class="eyebrow"><span></span> TGFVP student access</p>
+        <h1>Welcome<br><em>to learning.</em></h1>
+        <p class="admin-intro">Sign in to continue your course, or create your student account to enroll.</p>
+        <form class="admin-form login-form" id="student-login-form">
+          <label for="student-login-email">Email address</label>
+          <input id="student-login-email" name="email" type="email" autocomplete="username" required>
+          <label for="student-login-password">Password</label>
+          <input id="student-login-password" name="password" type="password" autocomplete="current-password" required>
+          <button class="button button-orange" type="submit">Sign in <span aria-hidden="true">↗</span></button>
+          <p class="admin-message" id="student-login-message" role="alert" aria-live="polite"></p>
+        </form>
+        <form class="admin-form register-form" id="student-register-form">
+          <h2>Create a student account</h2>
+          <label for="student-full-name">Full name</label>
+          <input id="student-full-name" name="fullName" minlength="2" maxlength="120" autocomplete="name" required>
+          <label for="student-register-email">Email address</label>
+          <input id="student-register-email" name="email" type="email" autocomplete="email" required>
+          <label for="student-register-password">Create a password</label>
+          <input id="student-register-password" name="password" type="password" minlength="14" maxlength="1024" autocomplete="new-password" required>
+          <p class="admin-field-hint">Use at least 14 characters. Registration creates a learner account; it does not grant staff access.</p>
+          <button class="button button-dark" type="submit">Create account <span aria-hidden="true">↗</span></button>
+          <p class="admin-message" id="student-register-message" role="alert" aria-live="polite"></p>
+        </form>
+      </section>
+
+      <section id="student-dashboard" hidden>
+        <div class="classroom-heading">
+          <div>
+            <p class="eyebrow"><span></span> Your learning pathway</p>
+            <h1>Keep moving<br><em>forward.</em></h1>
+            <p class="admin-intro">Welcome, <strong id="student-display-name"></strong>. Complete each released module to progress.</p>
+          </div>
+        </div>
+        <p class="admin-message" id="student-course-message" role="status" aria-live="polite"></p>
+        <div id="student-course-list" class="course-list" aria-live="polite"></div>
+      </section>
+
+      <section class="lesson-panel" id="student-lesson-panel" hidden aria-labelledby="student-lesson-title">
+        <div class="lesson-header">
+          <div>
+            <p class="eyebrow"><span></span> Learning module</p>
+            <h2 id="student-lesson-title"></h2>
+            <p class="admin-intro" id="student-lesson-description"></p>
+          </div>
+          <button class="button button-quiet" id="close-student-lesson" type="button">Back to pathway</button>
+        </div>
+        <article class="lesson-content" id="student-lesson-content"></article>
+        <div class="class-whiteboard student-whiteboard">
+          <div class="whiteboard-heading"><div><p class="micro-label">Classroom workspace</p><h3>Shared whiteboard</h3></div><span>Teacher-led</span></div>
+          <canvas id="student-board-canvas" class="whiteboard-canvas" aria-label="Shared classroom whiteboard"></canvas>
+          <p class="admin-field-hint">Whiteboard changes are saved by your teacher and persist when you return to class.</p>
+        </div>
+        <button class="button button-orange" id="complete-module" type="button">Mark module complete <span aria-hidden="true">↗</span></button>
+        <p class="admin-message" id="module-message" role="status" aria-live="polite"></p>
+      </section>
+
+      <section class="live-room" id="live-room" hidden aria-label="Live class">
+        <div class="lesson-header">
+          <div><p class="eyebrow"><span></span> Live class</p><h2 id="live-room-title"></h2></div>
+          <button class="button button-quiet" id="close-live-room" type="button">Back to pathway</button>
+        </div>
+        <p class="admin-intro">Your class meeting opens in a separate tab. Keep this page open for your lesson and shared whiteboard.</p>
+        <a class="button button-orange" id="live-meeting-link" href="#" target="_blank" rel="noopener noreferrer">Join live meeting <span aria-hidden="true">↗</span></a>
+        <div class="class-whiteboard student-whiteboard">
+          <div class="whiteboard-heading"><div><p class="micro-label">Classroom workspace</p><h3>Teacher’s shared whiteboard</h3></div><span>Live updates</span></div>
+          <canvas id="student-live-board-canvas" class="whiteboard-canvas" aria-label="Shared live-class whiteboard"></canvas>
+        </div>
+      </section>
+    </main>
+    <footer class="site-footer admin-footer">
+      <div class="container footer-bottom"><span>TGF Vocational Pathways · Student learning space</span><a href="/">Return to public website <span aria-hidden="true">↗</span></a></div>
+    </footer>
+  </body>
+</html>

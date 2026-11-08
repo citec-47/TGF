@@ -14,7 +14,6 @@
     >
     <link rel="stylesheet" href="/styles.css">
     <link rel="stylesheet" href="/admin.css">
-    <script src="/admin.js" defer></script>
   </head>
   <body class="admin-page">
     <a class="skip-link" href="#admin-main">Skip to dashboard</a>
@@ -25,6 +24,7 @@
           <span class="brand-caption">Admin<br>Dashboard</span>
         </a>
         <a class="text-link admin-public-link" href="/portal">Team portal <span aria-hidden="true">↗</span></a>
+        <a class="text-link admin-public-link" href="/teacher">Teacher studio <span aria-hidden="true">↗</span></a>
         <a class="text-link admin-public-link" href="/">View public website <span aria-hidden="true">↗</span></a>
         <button class="button button-dark admin-sign-out" id="sign-out" type="button" hidden>Sign out</button>
       </div>
@@ -116,6 +116,61 @@
             </form>
           </section>
         </div>
+
+        <section class="admin-panel accounts-panel" aria-labelledby="board-heading">
+          <div class="admin-panel-heading">
+            <div><p class="micro-label">Board and governance</p><h2 id="board-heading">TGF Group board profiles <span id="board-count"></span></h2></div>
+            <button class="button button-dark add-location" id="new-board-member" type="button"><span aria-hidden="true">+</span> Add profile</button>
+          </div>
+          <p class="admin-intro">Publish board members with portraits and biographies. Drag ordering is controlled with the hierarchy and display order.</p>
+          <p class="admin-message" id="board-message" role="status" aria-live="polite"></p>
+          <div class="admin-user-list" id="board-member-list"></div>
+          <form class="admin-form account-create-form" id="board-member-form" hidden>
+            <h3 id="board-form-heading">Add a board member</h3>
+            <input id="board-member-id" type="hidden">
+            <div class="admin-form-grid">
+              <div><label for="board-member-name">Full name</label><input id="board-member-name" maxlength="120" required></div>
+              <div><label for="board-member-title">Position or title</label><input id="board-member-title" maxlength="120" required></div>
+              <div><label for="board-member-group">Governance hierarchy</label><select id="board-member-group" required></select></div>
+              <div><label for="board-member-order">Order within hierarchy</label><input id="board-member-order" type="number" min="0" max="9999" value="0" required></div>
+            </div>
+            <label for="board-member-bio">Professional biography</label>
+            <textarea id="board-member-bio" maxlength="1200" rows="4" placeholder="Share a concise, approved professional biography."></textarea>
+            <label for="board-member-photo">Profile photograph</label>
+            <input id="board-member-photo" type="file" accept="image/jpeg,image/png,image/webp">
+            <span class="admin-field-hint">JPG, PNG or WebP · up to 8 MB</span>
+            <input id="board-member-photo-url" type="hidden">
+            <div class="photo-preview-wrap" id="board-photo-preview-wrap" hidden><img id="board-photo-preview" alt="Board member profile preview"></div>
+            <label class="active-toggle" for="board-member-active"><input id="board-member-active" type="checkbox" checked><span><strong>Published</strong><small>Show profile on the public leadership page</small></span></label>
+            <p class="admin-message" id="board-form-message" role="alert" aria-live="polite"></p>
+            <div class="admin-form-actions"><button class="button button-orange" id="save-board-member" type="submit">Save profile <span aria-hidden="true">↗</span></button><button class="button button-quiet" id="cancel-board-member" type="button">Cancel</button></div>
+          </form>
+        </section>
+
+        <section class="admin-panel site-settings-panel" aria-labelledby="course-heading">
+          <div class="admin-panel-heading"><div><p class="micro-label">Learning platform</p><h2 id="course-heading">Courses and module releases</h2></div></div>
+          <p class="admin-intro">Manage programs, their ordered modules, learner access and module-by-module progression. A locked module remains unavailable until an administrator releases it and its prerequisites are completed.</p>
+          <p class="admin-message" id="course-message" role="status" aria-live="polite"></p>
+          <div class="course-admin-list" id="course-admin-list"></div>
+          <form class="admin-form account-create-form" id="programme-form">
+            <h3>Add a programme</h3>
+            <div class="admin-form-grid"><div><label for="programme-title">Programme title</label><input id="programme-title" maxlength="120" required></div><div><label for="programme-order">Display order</label><input id="programme-order" type="number" min="0" max="9999" value="10" required></div></div>
+            <label for="programme-description">Description</label><textarea id="programme-description" maxlength="2000" rows="2"></textarea>
+            <button class="button button-dark" type="submit">Add programme <span aria-hidden="true">↗</span></button>
+          </form>
+          <form class="admin-form account-create-form" id="module-form">
+            <h3 id="module-form-heading">Add a module</h3>
+            <input id="module-id" type="hidden">
+            <div class="admin-form-grid"><div><label for="module-programme">Programme</label><select id="module-programme" required></select></div><div><label for="module-position">Module number</label><input id="module-position" type="number" min="1" max="9999" value="1" required></div></div>
+            <label for="module-title">Module title</label><input id="module-title" maxlength="160" required>
+            <label for="module-description">Module summary</label><textarea id="module-description" maxlength="1000" rows="2"></textarea>
+            <label for="module-content">Lesson content</label><textarea id="module-content" maxlength="30000" rows="6" placeholder="Lesson instructions or learning material."></textarea>
+            <label for="module-meeting-url">Optional class meeting link</label><input id="module-meeting-url" type="url" placeholder="https://...">
+            <label class="active-toggle" for="module-released"><input id="module-released" type="checkbox"><span><strong>Released</strong><small>Students still complete previous modules first</small></span></label>
+            <p class="admin-message" id="module-form-message" role="alert" aria-live="polite"></p>
+            <div class="admin-form-actions"><button class="button button-orange" id="save-module" type="submit">Add module <span aria-hidden="true">↗</span></button><button class="button button-quiet" id="cancel-module-edit" type="button" hidden>Cancel edit</button></div>
+          </form>
+        </section>
 
         <section class="admin-panel accounts-panel" aria-labelledby="accounts-heading">
           <div class="admin-panel-heading">

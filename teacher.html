@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#11100f">
+    <meta name="robots" content="noindex, nofollow">
+    <title>Teacher studio | TGF Vocational Pathways</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link
+      href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@400;500;600;700;800&display=swap"
+      rel="stylesheet"
+    >
+    <link rel="stylesheet" href="/styles.css">
+    <link rel="stylesheet" href="/admin.css">
+  </head>
+  <body class="admin-page classroom-page">
+    <a class="skip-link" href="#teacher-main">Skip to teacher studio</a>
+    <header class="site-header admin-header">
+      <div class="container header-inner">
+        <a class="brand" href="/" aria-label="TGF Vocational Pathways home">
+          <span class="brand-mark">TGF<span>VP</span><i aria-hidden="true">›</i></span>
+          <span class="brand-caption">Teacher<br>Studio</span>
+        </a>
+        <a class="text-link admin-public-link" href="/">Public website <span aria-hidden="true">↗</span></a>
+        <button class="button button-dark admin-sign-out" id="classroom-sign-out" type="button" hidden>Sign out</button>
+      </div>
+    </header>
+    <main class="admin-main container classroom-main" id="teacher-main">
+      <section id="teacher-login-panel" class="portal-login" hidden>
+        <p class="eyebrow"><span></span> TGFVP teacher access</p>
+        <h1>Welcome<br><em>to the studio.</em></h1>
+        <p class="admin-intro">Sign in with a teacher account created by your TGF Group administrator.</p>
+        <form class="admin-form login-form" id="teacher-login-form">
+          <label for="teacher-login-email">Email address</label>
+          <input id="teacher-login-email" name="email" type="email" autocomplete="username" required>
+          <label for="teacher-login-password">Password</label>
+          <input id="teacher-login-password" name="password" type="password" autocomplete="current-password" required>
+          <button class="button button-orange" type="submit">Sign in <span aria-hidden="true">↗</span></button>
+          <p class="admin-message" id="teacher-login-message" role="alert" aria-live="polite"></p>
+        </form>
+      </section>
+
+      <section id="teacher-dashboard" hidden>
+        <div class="classroom-heading">
+          <div><p class="eyebrow"><span></span> Teacher studio</p><h1>Teach with<br><em>purpose.</em></h1><p class="admin-intro">Welcome, <strong id="teacher-display-name"></strong>. Manage your teaching materials and live lessons.</p></div>
+          <a class="button button-dark" href="/admin" id="teacher-admin-link" hidden>Manage courses <span aria-hidden="true">↗</span></a>
+        </div>
+        <section class="admin-panel teacher-schedule-panel" aria-labelledby="teacher-classes-title">
+          <div class="admin-panel-heading"><div><p class="micro-label">Class schedule</p><h2 id="teacher-classes-title">Upcoming live classes</h2></div></div>
+          <p class="admin-message" id="teacher-class-message" role="status" aria-live="polite"></p>
+          <div class="live-class-list" id="teacher-class-list"></div>
+          <form class="admin-form teacher-class-form" id="teacher-class-form">
+            <h3>Schedule a live class</h3>
+            <div class="admin-form-grid">
+              <div><label for="live-module">Course module</label><select id="live-module" required></select></div>
+              <div><label for="live-class-title">Class title</label><input id="live-class-title" maxlength="160" required></div>
+              <div><label for="live-start-time">Start time</label><input id="live-start-time" type="datetime-local" required></div>
+              <div><label for="live-meeting-url">Meeting link</label><input id="live-meeting-url" type="url" placeholder="https://..." required></div>
+            </div>
+            <p class="admin-field-hint">Meeting links open through your configured secure meeting provider. Learner module-access rules also apply.</p>
+            <button class="button button-orange" type="submit">Schedule class <span aria-hidden="true">↗</span></button>
+          </form>
+        </section>
+        <section class="admin-panel teacher-schedule-panel">
+          <div class="admin-panel-heading"><div><p class="micro-label">Teaching materials</p><h2>Your programme modules</h2></div></div>
+          <div class="teacher-module-list" id="teacher-module-list"></div>
+        </section>
+      </section>
+
+      <section class="teacher-room" id="teacher-room" hidden>
+        <div class="lesson-header">
+          <div><p class="eyebrow"><span></span> Teacher classroom</p><h2 id="teacher-room-title"></h2><p class="admin-intro">Draw and explain concepts on this shared whiteboard. Your learners will see saved updates in their module.</p></div>
+          <button class="button button-quiet" id="close-teacher-room" type="button">Back to studio</button>
+        </div>
+        <div class="whiteboard-toolbar" role="toolbar" aria-label="Whiteboard drawing tools">
+          <label for="board-color">Ink colour</label><input id="board-color" type="color" value="#11100F" aria-label="Ink colour">
+          <label for="board-width">Brush</label><input id="board-width" type="range" min="1" max="12" value="4" aria-label="Brush size">
+          <button class="small-action" id="board-undo" type="button">Undo</button>
+          <button class="small-action" id="board-clear" type="button">Clear board</button>
+          <button class="button button-orange" id="board-save" type="button">Save whiteboard <span aria-hidden="true">↗</span></button>
+        </div>
+        <p class="admin-message" id="board-message" role="status" aria-live="polite"></p>
+        <canvas id="teacher-board-canvas" class="whiteboard-canvas teacher-board" aria-label="Teacher drawing surface"></canvas>
+      </section>
+
+      <section class="live-room" id="teacher-live-room" hidden>
+        <div class="lesson-header"><div><p class="eyebrow"><span></span> Live class</p><h2 id="teacher-live-title"></h2></div><button class="button button-quiet" id="close-teacher-live" type="button">Back to studio</button></div>
+        <p class="admin-intro">The external meeting opens separately; use the teacher studio to manage the lesson and its shared whiteboard.</p>
+        <a class="button button-orange" id="teacher-live-link" href="#" target="_blank" rel="noopener noreferrer">Open live meeting <span aria-hidden="true">↗</span></a>
+      </section>
+    </main>
+    <footer class="site-footer admin-footer">
+      <div class="container footer-bottom"><span>TGF Vocational Pathways · Teacher studio</span><a href="/">Return to public website <span aria-hidden="true">↗</span></a></div>
+    </footer>
+  </body>
+</html>

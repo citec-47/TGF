@@ -37,14 +37,33 @@ const flyerImageUrl = document.querySelector("#flyer-image-url");
 const flyerPreview = document.querySelector("#flyer-preview");
 const flyerPreviewWrap = document.querySelector("#flyer-preview-wrap");
 const saveSettingsButton = document.querySelector("#save-settings");
+const boardList = document.querySelector("#board-member-list");
+const boardCount = document.querySelector("#board-count");
+const boardMessage = document.querySelector("#board-message");
+const boardForm = document.querySelector("#board-member-form");
+const boardFormMessage = document.querySelector("#board-form-message");
+const boardPhoto = document.querySelector("#board-member-photo");
+const boardPhotoUrl = document.querySelector("#board-member-photo-url");
+const boardPhotoPreview = document.querySelector("#board-photo-preview");
+const boardPhotoPreviewWrap = document.querySelector("#board-photo-preview-wrap");
+const courseList = document.querySelector("#course-admin-list");
+const courseMessage = document.querySelector("#course-message");
+const programmeForm = document.querySelector("#programme-form");
+const moduleForm = document.querySelector("#module-form");
+const moduleFormMessage = document.querySelector("#module-form-message");
 let locations = [];
 let users = [];
+let boardMembers = [];
+let programmes = [];
+let modulesByProgramme = new Map();
+let hierarchyGroups = [];
 const roleOptions = [
   ["administrator", "Administrator"],
   ["executive", "Executive"],
   ["subsidiary_manager", "Subsidiary manager"],
   ["supervisor", "Supervisor"],
   ["operations", "Operations"],
+  ["teacher", "Teacher"],
   ["learner", "Learner"],
 ];
 const subsidiaryOptions = [
@@ -107,6 +126,91 @@ function renderLocations() {
     const empty = makeTag("p", "admin-empty", "No locations yet. Add the first location to get started.");
     locationList.append(empty);
     return;
+  }
+
+  function renderBoardMembers() {
+    boardList.replaceChildren();
+    boardCount.textContent = String(boardMembers.length);
+    if (!boardMembers.length) {
+      boardList.append(makeTag("p", "admin-empty", "No board profiles have been added."));
+      return;
+    }
+    for (const member of boardMembers) {
+      const card = makeTag("article", "admin-user");
+      const details = makeTag("div", "admin-user-details");
+      const title = makeTag("h3", "", member.fullName);
+      const description = makeTag(
+        "p",
+        "admin-location-subtitle",
+        `${member.hierarchyGroup} · ${member.positionTitle}${member.isActive ? "" : " · Unpublished"}`,
+      );
+      details.append(title, description);
+      const actions = makeTag("div", "admin-user-controls");
+      const edit = makeTag("button", "small-action", "Edit");
+      edit.type = "button";
+      edit.addEventListener("click", () => openBoardEditor(member));
+      const remove = makeTag("button", "small-action small-action-danger", "Delete");
+      remove.type = "button";
+      remove.addEventListener("click", () => void removeBoardMember(member));
+      actions.append(edit, remove);
+      card.append(details, actions);
+      boardList.append(card);
+    }
+  }
+
+  function renderCourses() {
+    courseList.replaceChildren();
+    if (!programmes.length) {
+      courseList.append(makeTag("p", "admin-empty", "No programmes are available yet."));
+      return;
+    }
+    for (const programme of programmes) {
+      const section = makeTag("section", "course-admin-card");
+      const heading = makeTag("div", "admin-panel-heading");
+      const details = makeTag("div", "");
+      details.append(
+        makeTag("p", "micro-label", programme.isActive ? "Open for learner enrollment" : "Enrollment closed"),
+        makeTag("h3", "", programme.title),
+        makeTag("p", "admin-location-subtitle", programme.description || "No description yet."),
+      );
+      const toggle = makeTag(
+        "button",
+        "small-action",
+        programme.isActive ? "Close enrollment" : "Open enrollment",
+      );
+      toggle.type = "button";
+      toggle.addEventListener("click", () => void toggleProgramme(programme));
+      heading.append(details, toggle);
+      const modules = makeTag("div", "module-admin-list");
+      for (const module of modulesByProgramme.get(programme.id) || []) {
+        const item = makeTag("article", "module-admin-card");
+        const titleWrap = makeTag("div", "");
+        titleWrap.append(
+          makeTag("strong", "", `Module ${module.position}: ${module.title}`),
+          makeTag("p", "admin-location-subtitle", module.description || "No summary."),
+        );
+        const release = makeTag(
+          "button",
+          module.isReleased ? "small-action" : "small-action small-action-danger",
+          module.isReleased ? "Released" : "Locked · Release",
+        );
+        release.type = "button";
+        release.setAttribute("aria-label", `${module.isReleased ? "Lock" : "Release"} ${module.title}`);
+        release.addEventListener("click", () => void toggleModuleRelease(module));
+        const actions = makeTag("div", "admin-user-controls");
+        const edit = makeTag("button", "small-action", "Edit module");
+        edit.type = "button";
+        edit.addEventListener("click", () => openModuleEditor(programme, module));
+        actions.append(edit, release);
+        item.append(titleWrap, actions);
+        modules.append(item);
+      }
+      if (!modules.childElementCount) {
+        modules.append(makeTag("p", "admin-empty", "No modules yet. Add the first module below."));
+      }
+      section.append(heading, modules);
+      courseList.append(section);
+    }
   }
 
   for (const location of locations) {
@@ -225,6 +329,151 @@ async function loadLocations() {
     setMessage(dashboardMessage, error.message, true);
     if (error.message.includes("sign in again")) showLogin();
   }
+}
+
+async function loadBoardMembers() {
+  try {
+    const result = await requestJson("/api/admin/board-members");
+    boardMembers = result.members;
+    hierarchyGroups = result.groups;
+    addSelectOptions(document.querySelector("#board-member-group"), hierarchyGroups.map((group) => [group, group]));
+    renderBoardMembers();
+  } catch (error) {
+    setMessage(boardMessage, error.message, true);
+  }
+}
+
+async function loadProgrammes() {
+  try {
+    programmes = await requestJson("/api/admin/programmes");
+    modulesByProgramme = new Map();
+    await Promise.all(programmes.map(async (programme) => {
+      modulesByProgramme.set(
+        programme.id,
+        await requestJson(`/api/admin/programmes/${encodeURIComponent(programme.id)}/modules`),
+      );
+    }));
+    const moduleProgrammeSelect = document.querySelector("#module-programme");
+    moduleProgrammeSelect.disabled = false;
+    addSelectOptions(
+      moduleProgrammeSelect,
+      programmes.map((programme) => [programme.id, programme.title]),
+      programmes[0]?.id || "",
+    );
+    renderCourses();
+  } catch (error) {
+    setMessage(courseMessage, error.message, true);
+  }
+}
+
+function openBoardEditor(member = null) {
+  setMessage(boardFormMessage, "");
+  boardForm.reset();
+  document.querySelector("#board-form-heading").textContent =
+    member ? `Edit ${member.fullName}` : "Add a board member";
+  document.querySelector("#board-member-id").value = member?.id || "";
+  document.querySelector("#board-member-name").value = member?.fullName || "";
+  document.querySelector("#board-member-title").value = member?.positionTitle || "";
+  addSelectOptions(
+    document.querySelector("#board-member-group"),
+    hierarchyGroups.map((group) => [group, group]),
+    member?.hierarchyGroup || hierarchyGroups[0],
+  );
+  document.querySelector("#board-member-bio").value = member?.biography || "";
+  document.querySelector("#board-member-order").value = String(member?.sortOrder ?? boardMembers.length + 1);
+  document.querySelector("#board-member-active").checked = member?.isActive ?? true;
+  boardPhotoUrl.value = member?.photoUrl || "";
+  boardPhoto.value = "";
+  boardPhotoPreview.src = boardPhotoUrl.value;
+  boardPhotoPreviewWrap.hidden = !boardPhotoUrl.value;
+  boardForm.hidden = false;
+  boardForm.scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+async function removeBoardMember(member) {
+  if (!window.confirm(`Delete ${member.fullName}'s public profile?`)) return;
+  try {
+    await requestJson(`/api/admin/board-members/${encodeURIComponent(member.id)}`, { method: "DELETE" });
+    boardMembers = boardMembers.filter((entry) => entry.id !== member.id);
+    renderBoardMembers();
+    setMessage(boardMessage, `${member.fullName}'s profile was deleted.`);
+  } catch (error) {
+    setMessage(boardMessage, error.message, true);
+  }
+}
+
+async function toggleProgramme(programme) {
+  try {
+    await requestJson(`/api/admin/programmes/${encodeURIComponent(programme.id)}`, {
+      method: "PATCH",
+      body: JSON.stringify({ ...programme, isActive: !programme.isActive }),
+    });
+    await loadProgrammes();
+    setMessage(courseMessage, `${programme.title} enrollment was updated.`);
+  } catch (error) {
+    setMessage(courseMessage, error.message, true);
+  }
+}
+
+async function toggleModuleRelease(module) {
+  try {
+    await requestJson(`/api/admin/modules/${encodeURIComponent(module.id)}`, {
+      method: "PATCH",
+      body: JSON.stringify({
+        title: module.title,
+        description: module.description,
+        lessonContent: module.lessonContent,
+        meetingUrl: module.meetingUrl,
+        position: module.position,
+        isReleased: !module.isReleased,
+      }),
+    });
+    await loadProgrammes();
+    setMessage(courseMessage, `${module.title} is now ${module.isReleased ? "locked" : "released"}.`);
+  } catch (error) {
+    setMessage(courseMessage, error.message, true);
+  }
+}
+
+function resetModuleEditor() {
+  moduleForm.reset();
+  document.querySelector("#module-id").value = "";
+  document.querySelector("#module-position").value = "1";
+  document.querySelector("#module-programme").disabled = false;
+  document.querySelector("#module-form-heading").textContent = "Add a module";
+  document.querySelector("#save-module").firstChild.textContent = "Add module ";
+  document.querySelector("#cancel-module-edit").hidden = true;
+  document.querySelector("#module-released").checked = false;
+  addSelectOptions(
+    document.querySelector("#module-programme"),
+    programmes.map((programme) => [programme.id, programme.title]),
+    programmes[0]?.id || "",
+  );
+}
+
+function openModuleEditor(programme, module) {
+  document.querySelector("#module-id").value = module.id;
+  document.querySelector("#module-programme").replaceChildren(
+    ...programmes.map((item) => {
+      const option = document.createElement("option");
+      option.value = item.id;
+      option.textContent = item.title;
+      option.selected = item.id === programme.id;
+      return option;
+    }),
+  );
+  document.querySelector("#module-programme").disabled = true;
+  document.querySelector("#module-title").value = module.title;
+  document.querySelector("#module-description").value = module.description;
+  document.querySelector("#module-content").value = module.lessonContent;
+  document.querySelector("#module-meeting-url").value = module.meetingUrl;
+  document.querySelector("#module-position").value = String(module.position);
+  document.querySelector("#module-released").checked = module.isReleased;
+  document.querySelector("#module-form-heading").textContent = `Edit ${module.title}`;
+  document.querySelector("#save-module").firstChild.textContent = "Save module ";
+  document.querySelector("#cancel-module-edit").hidden = false;
+  setMessage(moduleFormMessage, "");
+  moduleForm.scrollIntoView({ behavior: "smooth", block: "center" });
 }
 
 async function loadUsers() {
@@ -398,6 +647,77 @@ document.querySelector("#remove-photo").addEventListener("click", () => {
   photoPreviewWrap.hidden = true;
 });
 
+document.querySelector("#new-board-member").addEventListener("click", () => openBoardEditor());
+document.querySelector("#cancel-board-member").addEventListener("click", () => {
+  boardForm.hidden = true;
+  boardForm.reset();
+  boardPhotoUrl.value = "";
+  boardPhotoPreviewWrap.hidden = true;
+  setMessage(boardFormMessage, "");
+});
+
+boardPhoto.addEventListener("change", async () => {
+  const file = boardPhoto.files?.[0];
+  if (!file) return;
+  if (!["image/jpeg", "image/png", "image/webp"].includes(file.type) || file.size > 8 * 1024 * 1024) {
+    boardPhoto.value = "";
+    setMessage(boardFormMessage, "Choose a JPG, PNG or WebP portrait smaller than 8 MB.", true);
+    return;
+  }
+  const button = document.querySelector("#save-board-member");
+  button.disabled = true;
+  setMessage(boardFormMessage, "Uploading the profile portrait to Cloudinary…");
+  try {
+    boardPhotoUrl.value = await uploadPhoto(file, "tgfvp/board");
+    boardPhotoPreview.src = boardPhotoUrl.value;
+    boardPhotoPreviewWrap.hidden = false;
+    setMessage(boardFormMessage, "Portrait uploaded. Save the profile to publish it.");
+  } catch (error) {
+    boardPhoto.value = "";
+    setMessage(boardFormMessage, error.message, true);
+  } finally {
+    button.disabled = false;
+  }
+});
+
+boardForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  if (!boardForm.reportValidity()) return;
+  const button = document.querySelector("#save-board-member");
+  const id = document.querySelector("#board-member-id").value;
+  button.disabled = true;
+  setMessage(boardFormMessage, "Saving profile…");
+  try {
+    const saved = await requestJson(
+      id ? `/api/admin/board-members/${encodeURIComponent(id)}` : "/api/admin/board-members",
+      {
+        method: id ? "PATCH" : "POST",
+        body: JSON.stringify({
+          fullName: document.querySelector("#board-member-name").value,
+          positionTitle: document.querySelector("#board-member-title").value,
+          hierarchyGroup: document.querySelector("#board-member-group").value,
+          biography: document.querySelector("#board-member-bio").value,
+          photoUrl: boardPhotoUrl.value,
+          sortOrder: Number(document.querySelector("#board-member-order").value),
+          isActive: document.querySelector("#board-member-active").checked,
+        }),
+      },
+    );
+    const existing = boardMembers.findIndex((member) => member.id === saved.id);
+    if (existing < 0) boardMembers.push(saved);
+    else boardMembers[existing] = saved;
+    boardMembers.sort((left, right) => hierarchyGroups.indexOf(left.hierarchyGroup) - hierarchyGroups.indexOf(right.hierarchyGroup) || left.sortOrder - right.sortOrder);
+    renderBoardMembers();
+    boardForm.hidden = true;
+    boardForm.reset();
+    setMessage(boardMessage, `${saved.fullName}'s profile was saved.`);
+  } catch (error) {
+    setMessage(boardFormMessage, error.message, true);
+  } finally {
+    button.disabled = false;
+  }
+});
+
 photoField.addEventListener("change", async () => {
   const file = photoField.files?.[0];
   if (!file) return;
@@ -549,6 +869,71 @@ settingsForm.addEventListener("submit", async (event) => {
   }
 });
 
+programmeForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  if (!programmeForm.reportValidity()) return;
+  const button = programmeForm.querySelector('button[type="submit"]');
+  button.disabled = true;
+  try {
+    await requestJson("/api/admin/programmes", {
+      method: "POST",
+      body: JSON.stringify({
+        title: document.querySelector("#programme-title").value,
+        description: document.querySelector("#programme-description").value,
+        sortOrder: Number(document.querySelector("#programme-order").value),
+        isActive: true,
+      }),
+    });
+    programmeForm.reset();
+    document.querySelector("#programme-order").value = "10";
+    await loadProgrammes();
+    setMessage(courseMessage, "Programme created. Add its modules below.");
+  } catch (error) {
+    setMessage(courseMessage, error.message, true);
+  } finally {
+    button.disabled = false;
+  }
+});
+
+moduleForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  if (!moduleForm.reportValidity()) return;
+  const button = moduleForm.querySelector('button[type="submit"]');
+  button.disabled = true;
+  setMessage(moduleFormMessage, "");
+  const moduleId = document.querySelector("#module-id").value;
+  try {
+    await requestJson(
+      moduleId
+        ? `/api/admin/modules/${encodeURIComponent(moduleId)}`
+        : `/api/admin/programmes/${encodeURIComponent(document.querySelector("#module-programme").value)}/modules`,
+      {
+        method: moduleId ? "PATCH" : "POST",
+        body: JSON.stringify({
+          title: document.querySelector("#module-title").value,
+          description: document.querySelector("#module-description").value,
+          lessonContent: document.querySelector("#module-content").value,
+          meetingUrl: document.querySelector("#module-meeting-url").value,
+          position: Number(document.querySelector("#module-position").value),
+          isReleased: document.querySelector("#module-released").checked,
+        }),
+      },
+    );
+    resetModuleEditor();
+    await loadProgrammes();
+    setMessage(courseMessage, moduleId ? "Module details saved." : "Module added. Manage its release above.");
+  } catch (error) {
+    setMessage(moduleFormMessage, error.message, true);
+  } finally {
+    button.disabled = false;
+  }
+});
+
+document.querySelector("#cancel-module-edit").addEventListener("click", () => {
+  resetModuleEditor();
+  setMessage(moduleFormMessage, "");
+});
+
 loginForm.addEventListener("submit", async (event) => {
   event.preventDefault();
   const passwordInput = document.querySelector("#admin-password");
@@ -562,7 +947,7 @@ loginForm.addEventListener("submit", async (event) => {
     });
     passwordInput.value = "";
     showDashboard();
-    await Promise.all([loadLocations(), loadUsers(), loadSettings()]);
+    await Promise.all([loadLocations(), loadUsers(), loadSettings(), loadBoardMembers(), loadProgrammes()]);
   } catch (error) {
     setMessage(loginMessage, error.message, true);
   } finally {
@@ -592,7 +977,7 @@ async function initializeDashboard() {
     const result = await requestJson("/api/admin/session");
     if (result.authenticated) {
       showDashboard();
-      await Promise.all([loadLocations(), loadUsers(), loadSettings()]);
+      await Promise.all([loadLocations(), loadUsers(), loadSettings(), loadBoardMembers(), loadProgrammes()]);
     } else {
       showLogin();
     }

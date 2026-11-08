@@ -15,6 +15,14 @@ import {
   isValidAccentColor,
   validateSiteSettings,
 } from "./site-settings.js";
+import {
+  getBoardGroups,
+  validateBoardMember,
+  validateLiveClass,
+  validateModule,
+  validateProgramme,
+  validateWhiteboardStrokes,
+} from "./learning-validation.js";
 
 const validLocation = {
   city: "  Buea  ",
@@ -147,6 +155,7 @@ test("validates account roles without exposing main-administrator privilege", ()
     "subsidiary_manager",
     "supervisor",
     "operations",
+    "teacher",
     "learner",
   ]);
 });
@@ -182,4 +191,58 @@ test("validates resumption dates, readable colors, and account-owned flyer URLs"
       "demo-cloud",
     ).error,
   );
+});
+
+test("validates hierarchical board profiles and TGF-owned photos", () => {
+  const member = {
+    fullName: "  Board Member  ",
+    positionTitle: "Chairperson of the Board",
+    hierarchyGroup: "Board of Directors",
+    biography: "A short professional profile.",
+    photoUrl:
+      "https://res.cloudinary.com/demo-cloud/image/upload/tgfvp/board/chairperson.jpg",
+    sortOrder: 1,
+    isActive: true,
+  };
+  assert.equal(validateBoardMember(member, "demo-cloud").member.fullName, "Board Member");
+  assert.equal(getBoardGroups()[0], "Board of Directors");
+  assert.ok(validateBoardMember({ ...member, hierarchyGroup: "Unlisted" }, "demo-cloud").error);
+  assert.ok(
+    validateBoardMember(
+      { ...member, photoUrl: "https://example.com/photo.jpg" },
+      "demo-cloud",
+    ).error,
+  );
+});
+
+test("validates ordered learning modules, secure live classes, and whiteboard strokes", () => {
+  const module = {
+    title: "Module one",
+    description: "Introduction",
+    lessonContent: "Start here.",
+    meetingUrl: "https://meet.example.test/room",
+    position: 1,
+    isReleased: true,
+  };
+  assert.equal(validateModule(module).module.position, 1);
+  assert.ok(validateModule({ ...module, meetingUrl: "http://insecure.example.test" }).error);
+  assert.ok(validateProgramme({
+    title: "Software Engineering",
+    description: "Build software skills.",
+    sortOrder: 1,
+    isActive: true,
+  }).programme);
+  assert.ok(validateLiveClass({
+    moduleId: "123e4567-e89b-12d3-a456-426614174000",
+    title: "Live session",
+    meetingUrl: "https://meet.example.test/class",
+    startsAt: "2027-01-15T10:00:00Z",
+  }).liveClass);
+  assert.deepEqual(
+    validateWhiteboardStrokes([
+      { color: "#123456", width: 3, points: [{ x: 0.1, y: 0.4 }, { x: 0.7, y: 0.9 }] },
+    ]).strokes[0].points.length,
+    2,
+  );
+  assert.ok(validateWhiteboardStrokes([{ color: "red", width: 3, points: [{ x: 0, y: 0 }] }]).error);
 });

@@ -6,6 +6,7 @@ export const ACCOUNT_ROLES = Object.freeze([
   "subsidiary_manager",
   "supervisor",
   "operations",
+  "teacher",
   "learner",
 ]);
 

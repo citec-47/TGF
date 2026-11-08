@@ -1951,3 +1951,87 @@ h3 {
     transition-duration: 0.01ms !important;
   }
 }
+
+.leadership-section {
+  padding-block: 96px;
+  background: #f0ede7;
+}
+
+.leadership-section .group-heading {
+  margin-bottom: 32px;
+}
+
+.leadership-groups {
+  display: grid;
+  gap: 30px;
+  margin-bottom: 28px;
+}
+
+.leadership-group h3 {
+  margin: 0 0 15px;
+  font-family: var(--font-display);
+  font-size: 19px;
+}
+
+.leadership-group-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  gap: 14px;
+}
+
+.leadership-card {
+  overflow: hidden;
+  border: 1px solid #e0dcd4;
+  background: #fff;
+}
+
+.leadership-card img,
+.leadership-avatar {
+  display: grid;
+  width: 100%;
+  height: 245px;
+  place-items: center;
+  background: linear-gradient(140deg, #24211d, #493a2e);
+  color: #f47d20;
+  font-family: var(--font-display);
+  font-size: 48px;
+  font-weight: 800;
+  object-fit: cover;
+}
+
+.leadership-card-copy {
+  padding: 18px;
+}
+
+.leadership-card-copy .micro-label {
+  color: #9c4a16;
+}
+
+.leadership-card-copy h4 {
+  margin: 4px 0;
+  font-family: var(--font-display);
+  font-size: 17px;
+}
+
+.leadership-card-copy p:last-child {
+  margin: 8px 0 0;
+  color: #625d57;
+  font-size: 12px;
+  line-height: 1.65;
+}
+
+.leadership-empty {
+  margin: 0;
+  border: 1px dashed #c9c2b8;
+  padding: 32px;
+  color: #625d57;
+  font-size: 13px;
+  text-align: center;
+}
+
+.programme-description {
+  margin: -10px 0 16px;
+  color: #625d57;
+  font-size: 11px;
+  line-height: 1.65;
+}
