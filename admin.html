@@ -1,0 +1,181 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#11100f">
+    <meta name="robots" content="noindex, nofollow">
+    <title>TGF Group dashboard | TGFVP Admin</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link
+      href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@400;500;600;700;800&display=swap"
+      rel="stylesheet"
+    >
+    <link rel="stylesheet" href="/styles.css">
+    <link rel="stylesheet" href="/admin.css">
+    <script src="/admin.js" defer></script>
+  </head>
+  <body class="admin-page">
+    <a class="skip-link" href="#admin-main">Skip to dashboard</a>
+    <header class="site-header admin-header">
+      <div class="container header-inner">
+        <a class="brand" href="/" aria-label="TGF Vocational Pathways home">
+          <span class="brand-mark">TGF<span>VP</span><i aria-hidden="true">›</i></span>
+          <span class="brand-caption">Admin<br>Dashboard</span>
+        </a>
+        <a class="text-link admin-public-link" href="/portal">Team portal <span aria-hidden="true">↗</span></a>
+        <a class="text-link admin-public-link" href="/">View public website <span aria-hidden="true">↗</span></a>
+        <button class="button button-dark admin-sign-out" id="sign-out" type="button" hidden>Sign out</button>
+      </div>
+    </header>
+
+    <main class="admin-main container" id="admin-main">
+      <section class="admin-login" id="login-panel" aria-labelledby="login-title" hidden>
+        <p class="eyebrow"><span></span> TGFVP team access</p>
+        <h1 id="login-title">Welcome<br><em>back.</em></h1>
+        <p class="admin-intro">Sign in with the main administrator password, or use your TGF Group account in the <a href="/portal">team portal</a>.</p>
+        <form id="login-form" class="admin-form login-form">
+          <label for="admin-password">Main administrator password</label>
+          <input id="admin-password" name="password" type="password" autocomplete="current-password" required>
+          <button class="button button-orange" type="submit">Sign in <span aria-hidden="true">↗</span></button>
+          <p class="admin-message" id="login-message" role="alert" aria-live="polite"></p>
+        </form>
+      </section>
+
+      <section id="dashboard-panel" hidden>
+        <div class="admin-heading">
+          <div>
+            <p class="eyebrow"><span></span> Website management</p>
+            <h1>TGF Group<br><em>dashboard.</em></h1>
+          </div>
+          <p class="admin-intro" id="admin-welcome">Manage staff accounts, TGFVP locations and public website settings. Changes are saved to the database.</p>
+        </div>
+
+        <div class="admin-workspace">
+          <section class="admin-panel locations-panel" aria-labelledby="locations-heading">
+            <div class="admin-panel-heading">
+              <div>
+                <p class="micro-label">Manage locations</p>
+                <h2 id="locations-heading">Your locations <span id="location-count"></span></h2>
+              </div>
+              <button class="button button-dark add-location" id="new-location" type="button">
+                <span aria-hidden="true">+</span> Add location
+              </button>
+            </div>
+            <p class="admin-message" id="dashboard-message" role="status" aria-live="polite"></p>
+            <div class="admin-location-list" id="admin-location-list" aria-live="polite"></div>
+          </section>
+
+          <section class="admin-panel editor-panel" id="editor-panel" aria-labelledby="editor-heading" hidden>
+            <div class="editor-heading">
+              <div>
+                <p class="micro-label">Location details</p>
+                <h2 id="editor-heading">Add a location</h2>
+              </div>
+              <button class="editor-close" id="cancel-location" type="button" aria-label="Close location form">×</button>
+            </div>
+            <form class="admin-form" id="location-form">
+              <input id="location-id" name="id" type="hidden">
+              <label for="location-city">City or town <span aria-hidden="true">*</span></label>
+              <input id="location-city" name="city" maxlength="100" autocomplete="address-level2" required>
+
+              <label for="location-region">Region</label>
+              <input id="location-region" name="region" maxlength="100" placeholder="e.g. Northwest Region" autocomplete="address-level1">
+
+              <label for="location-address">Address or directions</label>
+              <textarea id="location-address" name="address" maxlength="300" rows="2" placeholder="Street, neighbourhood, landmarks"></textarea>
+
+              <label for="location-description">Additional information</label>
+              <textarea id="location-description" name="description" maxlength="500" rows="2" placeholder="Optional details visitors should know"></textarea>
+
+              <label for="location-photo">Location photo</label>
+              <input id="location-photo" name="photo" type="file" accept="image/jpeg,image/png,image/webp">
+              <span class="admin-field-hint">JPG, PNG or WebP · up to 8 MB</span>
+              <div class="photo-preview-wrap" id="photo-preview-wrap" hidden>
+                <img id="photo-preview" alt="Location photo preview">
+                <button class="remove-photo" id="remove-photo" type="button">Remove photo</button>
+              </div>
+              <input id="location-image-url" name="imageUrl" type="hidden">
+
+              <div class="admin-form-row">
+                <div>
+                  <label for="location-sort-order">Display order</label>
+                  <input id="location-sort-order" name="sortOrder" type="number" min="0" max="9999" step="1" value="0" required>
+                </div>
+                <label class="active-toggle" for="location-active">
+                  <input id="location-active" name="isActive" type="checkbox" checked>
+                  <span><strong>Visible</strong><small>Show on public website</small></span>
+                </label>
+              </div>
+              <p class="admin-message" id="form-message" role="alert" aria-live="polite"></p>
+              <div class="admin-form-actions">
+                <button class="button button-orange" id="save-location" type="submit">Save location <span aria-hidden="true">↗</span></button>
+                <button class="button button-quiet" id="cancel-location-form" type="button">Cancel</button>
+              </div>
+            </form>
+          </section>
+        </div>
+
+        <section class="admin-panel accounts-panel" aria-labelledby="accounts-heading">
+          <div class="admin-panel-heading">
+            <div>
+              <p class="micro-label">People and permissions</p>
+              <h2 id="accounts-heading">Team accounts <span id="account-count"></span></h2>
+            </div>
+          </div>
+          <p class="admin-intro">Create access, assign organizational roles, freeze or restore accounts, reset a password, or remove access.</p>
+          <p class="admin-message" id="account-message" role="status" aria-live="polite"></p>
+          <div class="credential-card" id="account-credential" role="status" hidden>
+            <div><strong id="credential-name"></strong><p>Share this temporary password securely. It is not saved for later viewing.</p></div>
+            <code id="credential-password"></code>
+            <button class="small-action" id="copy-credential" type="button">Copy password</button>
+            <button class="small-action" id="dismiss-credential" type="button">Hide</button>
+          </div>
+          <div class="admin-user-list" id="admin-user-list" aria-live="polite"></div>
+          <form class="admin-form account-create-form" id="account-form">
+            <h3>Create a team account</h3>
+            <div class="admin-form-grid">
+              <div><label for="account-name">Full name</label><input id="account-name" name="fullName" maxlength="120" autocomplete="name" required></div>
+              <div><label for="account-email">Email address</label><input id="account-email" name="email" type="email" maxlength="254" autocomplete="email" required></div>
+              <div><label for="account-role">Organizational role</label><select id="account-role" name="role" required></select></div>
+              <div><label for="account-subsidiary">Company or team</label><select id="account-subsidiary" name="subsidiary" required></select></div>
+            </div>
+            <p class="admin-field-hint">A temporary password is created once. Share it directly and ask the person to change it at first sign-in.</p>
+            <p class="admin-message" id="account-form-message" role="alert" aria-live="polite"></p>
+            <button class="button button-orange" type="submit">Create account <span aria-hidden="true">↗</span></button>
+          </form>
+        </section>
+
+        <section class="admin-panel site-settings-panel" aria-labelledby="settings-heading">
+          <div class="admin-panel-heading">
+            <div>
+              <p class="micro-label">Public website</p>
+              <h2 id="settings-heading">Flyer and intake details</h2>
+            </div>
+          </div>
+          <p class="admin-intro">Update the TGFVP flyer, accent colour and training resumption date shown to visitors.</p>
+          <form class="admin-form" id="settings-form">
+            <div class="admin-form-grid">
+              <div><label for="resumption-label">Date label</label><input id="resumption-label" name="resumptionLabel" maxlength="100" required></div>
+              <div><label for="resumption-date">Resumption date</label><input id="resumption-date" name="resumptionDate" type="date"></div>
+              <div><label for="accent-color">Flyer accent colour</label><input id="accent-color" name="accentColor" type="color" value="#F47D20" required></div>
+              <div><label for="flyer-file">Upload a replacement flyer</label><input id="flyer-file" name="flyer" type="file" accept="image/jpeg,image/png,image/webp"><span class="admin-field-hint">JPG, PNG or WebP · up to 8 MB</span></div>
+            </div>
+            <input id="flyer-image-url" name="flyerImageUrl" type="hidden">
+            <div class="photo-preview-wrap" id="flyer-preview-wrap" hidden><img id="flyer-preview" alt="Current TGFVP flyer preview"></div>
+            <p class="admin-message" id="settings-message" role="status" aria-live="polite"></p>
+            <button class="button button-orange" id="save-settings" type="submit">Save website settings <span aria-hidden="true">↗</span></button>
+          </form>
+        </section>
+      </section>
+    </main>
+
+    <footer class="site-footer admin-footer">
+      <div class="container footer-bottom">
+        <span>TGF Vocational Pathways · Admin</span>
+        <a href="/">Return to public website <span aria-hidden="true">↗</span></a>
+      </div>
+    </footer>
+  </body>
+</html>

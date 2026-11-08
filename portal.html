@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#11100f">
+    <meta name="robots" content="noindex, nofollow">
+    <title>Team portal | TGF Group</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link
+      href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@400;500;600;700;800&display=swap"
+      rel="stylesheet"
+    >
+    <link rel="stylesheet" href="/styles.css">
+    <link rel="stylesheet" href="/admin.css">
+  </head>
+  <body class="admin-page">
+    <a class="skip-link" href="#portal-main">Skip to portal</a>
+    <header class="site-header admin-header">
+      <div class="container header-inner">
+        <a class="brand" href="/" aria-label="TGF Vocational Pathways home">
+          <span class="brand-mark">TGF<span>VP</span><i aria-hidden="true">›</i></span>
+          <span class="brand-caption">TGF Group<br>Team Portal</span>
+        </a>
+        <a class="text-link admin-public-link" href="/">View public website <span aria-hidden="true">↗</span></a>
+        <button class="button button-dark admin-sign-out" id="portal-sign-out" type="button" hidden>Sign out</button>
+      </div>
+    </header>
+
+    <main class="admin-main container" id="portal-main">
+      <section class="portal-login" id="portal-login-panel" aria-labelledby="portal-login-title" hidden>
+        <p class="eyebrow"><span></span> TGF Group team access</p>
+        <h1 id="portal-login-title">Welcome<br><em>to the team.</em></h1>
+        <p class="admin-intro">Sign in with the email and password provided by your TGF Group administrator.</p>
+        <form class="admin-form login-form" id="portal-login-form">
+          <label for="portal-email">Email address</label>
+          <input id="portal-email" name="email" type="email" autocomplete="username" required>
+          <label for="portal-password">Password</label>
+          <input id="portal-password" name="password" type="password" autocomplete="current-password" required>
+          <button class="button button-orange" type="submit">Sign in <span aria-hidden="true">↗</span></button>
+          <p class="admin-message" id="portal-login-message" role="alert" aria-live="polite"></p>
+        </form>
+      </section>
+
+      <section class="portal-panel" id="portal-dashboard" hidden>
+        <p class="eyebrow"><span></span> TGF Group team portal</p>
+        <h1 id="portal-name"></h1>
+        <span class="portal-role" id="portal-role"></span>
+        <p class="portal-company" id="portal-company"></p>
+        <div class="portal-info">
+          <p id="portal-access-description"></p>
+          <p>Your dashboard access is managed by your administrator. Contact them if your role, company or access needs to change.</p>
+        </div>
+        <div class="portal-actions">
+          <a class="button button-orange" href="/admin" id="portal-admin-link" hidden>Open administration dashboard <span aria-hidden="true">↗</span></a>
+          <a class="button button-dark" href="/">View public website <span aria-hidden="true">↗</span></a>
+        </div>
+        <section class="portal-password-panel" aria-labelledby="portal-password-heading">
+          <h2 id="portal-password-heading">Update your password</h2>
+          <p class="admin-intro" id="password-hint">Use at least 14 characters. Never share your password.</p>
+          <form class="admin-form" id="portal-password-form">
+            <label for="new-password">New password</label>
+            <input id="new-password" name="password" type="password" minlength="14" maxlength="1024" autocomplete="new-password" required>
+            <button class="button button-orange" type="submit">Change password <span aria-hidden="true">↗</span></button>
+            <p class="admin-message" id="portal-password-message" role="status" aria-live="polite"></p>
+          </form>
+        </section>
+      </section>
+    </main>
+
+    <footer class="site-footer admin-footer">
+      <div class="container footer-bottom">
+        <span>TGF Group · Team Portal</span>
+        <a href="/">Return to public website <span aria-hidden="true">↗</span></a>
+      </div>
+    </footer>
+    <script src="/portal.js" defer></script>
+  </body>
+</html>
