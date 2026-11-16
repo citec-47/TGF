@@ -1,0 +1,5 @@
+ALTER TABLE tgf_live_classes
+  ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ;
+
+ALTER TABLE tgf_live_classes
+  ADD COLUMN IF NOT EXISTS deleted_by UUID REFERENCES tgf_users(id) ON DELETE SET NULL;

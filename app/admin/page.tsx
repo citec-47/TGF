@@ -1,6 +1,6 @@
-import { readFile } from "node:fs/promises";
-import path from "node:path";
 import Script from "next/script";
+
+import { loadPageBody } from "../lib/static-page";
 
 export const metadata = {
   title: "TGF Group dashboard | TGFVP Admin",
@@ -10,16 +10,16 @@ export const metadata = {
 export const dynamic = "force-dynamic";
 
 export default async function AdminPage() {
-  const document = await readFile(path.join(process.cwd(), "admin.html"), "utf8");
-  const body = document.match(/<body\b[^>]*>([\s\S]*?)<\/body>/i)?.[1];
-  if (!body) {
-    throw new Error("Could not load the TGFVP admin dashboard.");
-  }
+  const body = await loadPageBody("admin.html", "TGFVP admin dashboard");
 
   return (
     <div className="admin-page">
       <div dangerouslySetInnerHTML={{ __html: body }} />
       <Script src="/admin.js" strategy="afterInteractive" />
+      <Script src="/corporate-content-admin.js" strategy="afterInteractive" />
+      <Script src="/submissions-admin.js" strategy="afterInteractive" />
+      <Script src="/messages.js" strategy="afterInteractive" />
+      <Script src="/collaboration.js" strategy="afterInteractive" />
     </div>
   );
 }

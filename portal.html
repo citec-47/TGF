@@ -66,6 +66,22 @@
             <p class="admin-message" id="portal-password-message" role="status" aria-live="polite"></p>
           </form>
         </section>
+        <section class="admin-panel enrollment-panel message-center user-message-center" data-message-center="user" aria-labelledby="portal-messages-heading" hidden>
+          <div class="admin-panel-heading"><div><p class="micro-label">Private support conversation</p><h2 id="portal-messages-heading">Messages with the administrator</h2></div><button class="small-action" type="button" data-message-refresh>Refresh messages</button></div>
+          <p class="admin-intro">Send a private message to the administrator. You can attach up to five supported files to one message.</p>
+          <div class="message-thread" data-message-thread aria-live="polite"></div>
+          <form class="admin-form message-composer" data-message-form>
+            <label for="portal-message-body">Message</label>
+            <textarea id="portal-message-body" data-message-body maxlength="2000" rows="3" placeholder="Write an optional message or describe your attachments"></textarea>
+            <label class="message-file-picker" for="portal-message-files">Attach files</label>
+            <input id="portal-message-files" data-message-files type="file" accept=".pdf,.doc,.docx,.jpg,.jpeg,.png,.webp,.mp4,.mov,.webm,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,image/jpeg,image/png,image/webp,video/mp4,video/quicktime,video/webm" multiple>
+            <p class="admin-field-hint message-limits" data-message-limits></p>
+            <div class="message-attachment-previews" data-message-previews aria-live="polite"></div>
+            <progress class="message-upload-progress" data-message-progress max="100" value="0" hidden></progress>
+            <p class="admin-message" data-message-status role="status" aria-live="polite"></p>
+            <button class="button button-orange" type="submit" data-message-send disabled>Send message <span aria-hidden="true">↗</span></button>
+          </form>
+        </section>
       </section>
     </main>
 

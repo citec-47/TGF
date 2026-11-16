@@ -445,6 +445,25 @@ h3 {
   pointer-events: none;
 }
 
+.flyer-date-overlay {
+  position: absolute;
+  z-index: 1;
+  top: 45.8%;
+  left: 2%;
+  display: grid;
+  width: 46%;
+  min-height: 2.6%;
+  place-items: center;
+  overflow: hidden;
+  background: #f47d20;
+  color: #17110c;
+  font-size: 8px;
+  font-weight: 800;
+  line-height: 1;
+  text-align: center;
+  white-space: nowrap;
+}
+
 .hero-art img {
   width: 100%;
   max-height: 505px;

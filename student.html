@@ -24,7 +24,27 @@
           <span class="brand-caption">Student<br>Learning Space</span>
         </a>
         <a class="text-link admin-public-link" href="/">Public website <span aria-hidden="true">↗</span></a>
-        <button class="button button-dark admin-sign-out" id="classroom-sign-out" type="button" hidden>Sign out</button>
+        <div class="admin-header-actions">
+          <button
+            class="admin-theme-toggle"
+            id="dashboard-theme-toggle"
+            type="button"
+            aria-label="Switch to dark mode"
+            aria-pressed="false"
+            title="Switch to dark mode"
+            hidden
+          >
+            <svg class="icon-moon" viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M20.2 15.4A8.5 8.5 0 0 1 8.6 3.8 8.6 8.6 0 1 0 20.2 15.4Z"></path>
+            </svg>
+            <svg class="icon-sun" viewBox="0 0 24 24" aria-hidden="true">
+              <circle cx="12" cy="12" r="4"></circle>
+              <path d="M12 2v2m0 16v2M4.93 4.93l1.42 1.42m11.3 11.3 1.42 1.42M2 12h2m16 0h2M4.93 19.07l1.42-1.42m11.3-11.3 1.42-1.42"></path>
+            </svg>
+          </button>
+          <span class="sr-only" data-user-theme-status role="status" aria-live="polite"></span>
+          <button class="button button-dark admin-sign-out" id="classroom-sign-out" type="button" hidden>Sign out</button>
+        </div>
       </div>
     </header>
     <main class="admin-main container classroom-main" id="student-main">
@@ -32,6 +52,7 @@
         <p class="eyebrow"><span></span> TGFVP student access</p>
         <h1>Welcome<br><em>to learning.</em></h1>
         <p class="admin-intro">Sign in to continue your course, or create your student account to enroll.</p>
+        <p class="admin-message student-account-status-message" id="student-account-status-message" role="status" aria-live="polite" hidden></p>
         <form class="admin-form login-form" id="student-login-form">
           <label for="student-login-email">Email address</label>
           <input id="student-login-email" name="email" type="email" autocomplete="username" required>
@@ -54,16 +75,243 @@
         </form>
       </section>
 
+      <section id="student-enrollment-panel" class="student-state-panel" hidden aria-labelledby="student-enrollment-title">
+        <p class="eyebrow"><span></span> TGFVP student access</p>
+        <h1 id="student-enrollment-title">Choose a learning<br><em>pathway.</em></h1>
+        <p class="admin-intro">Choose a programme to request enrollment. Your dashboard opens after the administrator approves your request.</p>
+        <p class="admin-message" id="student-enrollment-message" role="status" aria-live="polite"></p>
+        <div id="student-enrollment-list" class="course-list" aria-live="polite"></div>
+      </section>
+
+      <section id="student-pending-panel" class="student-state-panel" hidden aria-labelledby="student-pending-title">
+        <p class="eyebrow"><span></span> TGFVP student access</p>
+        <h1 id="student-pending-title">Your request is<br><em>under review.</em></h1>
+        <p class="admin-intro">The administrator must confirm your enrollment before your learning dashboard becomes available.</p>
+        <div id="student-pending-programmes" class="course-list" aria-live="polite"></div>
+        <p class="admin-message" id="student-pending-message" role="status" aria-live="polite"></p>
+        <button class="button button-quiet" id="student-refresh-enrollments" type="button">Check approval status</button>
+      </section>
+      <input id="student-payment-proof" type="file" accept=".pdf,.jpg,.jpeg,.png,.doc,.docx" hidden aria-label="Payment evidence document">
+
       <section id="student-dashboard" hidden>
-        <div class="classroom-heading">
-          <div>
-            <p class="eyebrow"><span></span> Your learning pathway</p>
-            <h1>Keep moving<br><em>forward.</em></h1>
-            <p class="admin-intro">Welcome, <strong id="student-display-name"></strong>. Complete each released module to progress.</p>
+        <div class="student-dashboard-shell">
+          <aside class="student-sidebar" aria-label="Student dashboard navigation">
+            <p class="micro-label">Learning space</p>
+            <nav>
+              <a href="#student-overview">
+                <svg class="student-nav-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m3 10 9-7 9 7v10H5V9.5M9 20v-6h6v6" /></svg>
+                <span>Overview</span>
+              </a>
+              <a href="#student-pathways">
+                <svg class="student-nav-icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="4" width="14" height="16" rx="2" /><path d="M9 4v16m3-11h4m-4 4h4" /></svg>
+                <span>My pathways</span>
+              </a>
+              <a href="#student-my-course">
+                <svg class="student-nav-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5.5A2.5 2.5 0 0 1 6.5 3H20v17H6.5A2.5 2.5 0 0 0 4 22z" /><path d="M4 5.5v16.5m5-15h7m-7 4h7m-7 4h5" /></svg>
+                <span>My course</span>
+              </a>
+              <a href="#student-fees">
+                <svg class="student-nav-icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2" /><path d="M3 10h18m-13 5h4" /></svg>
+                <span>Fees</span>
+              </a>
+              <a href="#student-upcoming-classes">
+                <svg class="student-nav-icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2" /><path d="m10 9 5 3-5 3z" /></svg>
+                <span>Live classes</span>
+              </a>
+              <a href="#student-timetable">
+                <svg class="student-nav-icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="17" rx="2" /><path d="M8 2v4m8-4v4M3 9h18m-13 4h3m-3 4h6" /></svg>
+                <span>My Timetable</span>
+              </a>
+              <a href="#student-attendance">
+                <svg class="student-nav-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m4 12 5 5L20 6" /><path d="M21 12a9 9 0 1 1-5.3-8.2" /></svg>
+                <span>Attendance</span>
+              </a>
+              <a href="#student-recordings">
+                <svg class="student-nav-icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2" /><path d="m10 9 5 3-5 3z" /></svg>
+                <span>Recorded classes</span>
+              </a>
+              <a href="#student-messages">
+                <svg class="student-nav-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11.5a7.5 7.5 0 0 1-7.5 7.5 8 8 0 0 1-3.5-.8L4 20l1.5-4A7.5 7.5 0 1 1 20 11.5Z" /><path d="M8 11h8m-8 3h5" /></svg>
+                <span>Messages</span>
+              </a>
+            </nav>
+          </aside>
+          <div class="student-dashboard-content">
+            <section id="student-overview" class="student-dashboard-overview student-dashboard-view" aria-labelledby="student-overview-title">
+              <header class="classroom-heading student-welcome">
+                <div>
+                  <p class="eyebrow"><span></span> Your learning space</p>
+                  <h1 id="student-overview-title">Welcome back,<br><em id="student-display-name"></em></h1>
+                  <p class="admin-intro">Your learning, all in one place. Pick up where you left off.</p>
+                </div>
+              </header>
+
+              <section class="student-quick-access" aria-label="Quick access">
+                <a class="student-quick-card" href="#student-my-course">
+                  <svg class="student-quick-icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="4" width="14" height="16" rx="2" /><path d="M9 4v16m3-11h4m-4 4h4" /></svg>
+                  <span class="student-quick-copy"><strong>My course</strong><small>Continue your programme</small></span>
+                  <span class="student-quick-arrow" aria-hidden="true">↗</span>
+                </a>
+                <a class="student-quick-card" href="#student-upcoming-classes">
+                  <svg class="student-quick-icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2" /><path d="m10 9 5 3-5 3z" /></svg>
+                  <span class="student-quick-copy"><strong>Live classes</strong><small>See your upcoming sessions</small></span>
+                  <span class="student-quick-arrow" aria-hidden="true">↗</span>
+                </a>
+                <a class="student-quick-card" href="#student-messages">
+                  <svg class="student-quick-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11.5a7.5 7.5 0 0 1-7.5 7.5 8 8 0 0 1-3.5-.8L4 20l1.5-4A7.5 7.5 0 1 1 20 11.5Z" /><path d="M8 11h8m-8 3h5" /></svg>
+                  <span class="student-quick-copy"><strong>Support messages</strong><small>Contact the TGFVP team</small></span>
+                  <span class="student-quick-arrow" aria-hidden="true">↗</span>
+                </a>
+              </section>
+
+              <section class="student-progress-overview" aria-labelledby="student-progress-title">
+                <h2 id="student-progress-title">Your progress</h2>
+                <div class="student-dashboard-summary" aria-label="Learning overview">
+                  <div class="student-stat"><span>Approved pathways</span><strong id="student-active-count">0</strong></div>
+                  <div class="student-stat"><span>Modules completed</span><strong id="student-completed-count">0</strong></div>
+                  <div class="student-stat"><span>Upcoming live classes</span><strong id="student-live-count">0</strong></div>
+                </div>
+                <div class="collaboration-schedule-list" data-collab-live-overview aria-live="polite"></div>
+              </section>
+            </section>
+            <section id="student-fees" class="student-dashboard-section student-dashboard-view" aria-labelledby="student-fees-title" hidden>
+              <div class="student-dashboard-section-heading">
+                <div><p class="micro-label">Manage payments</p><h2 id="student-fees-title">Fees &amp; payment plans</h2></div>
+                <span class="student-section-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2" /><path d="M3 10h18m-13 5h4" /></svg></span>
+              </div>
+              <p class="admin-intro">See your programme fees, payment schedule and receipt review status in one place.</p>
+              <p class="admin-message" id="student-course-message" role="status" aria-live="polite"></p>
+              <div id="student-fees-list" class="student-fees-list" aria-live="polite"></div>
+            </section>
+            <section id="student-pathways" class="student-dashboard-section student-dashboard-view" aria-labelledby="student-pathways-title" hidden>
+              <div class="student-dashboard-section-heading">
+                <div><p class="micro-label">Your learning</p><h2 id="student-pathways-title">My pathways</h2></div>
+                <span class="student-section-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><rect x="5" y="4" width="14" height="16" rx="2" /><path d="M9 4v16m3-11h4m-4 4h4" /></svg></span>
+              </div>
+              <p class="admin-intro">Your enrolled programmes and learning progress.</p>
+              <div id="student-pathway-list" class="student-pathway-list" aria-live="polite"></div>
+            </section>
+            <section id="student-my-course" class="student-dashboard-section student-dashboard-view" aria-labelledby="student-my-course-title" hidden>
+              <div class="student-dashboard-section-heading">
+                <div><p class="micro-label">Your lessons</p><h2 id="student-my-course-title">My course</h2></div>
+                <span class="student-section-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 5.5A2.5 2.5 0 0 1 6.5 3H20v17H6.5A2.5 2.5 0 0 0 4 22z" /><path d="M4 5.5v16.5m5-15h7m-7 4h7m-7 4h5" /></svg></span>
+              </div>
+              <p class="admin-intro">Choose an enrolled course to see its modules. Each module has four weekly blocks, with a capstone in Week 4. Your next module opens after your teacher approves the capstone.</p>
+              <div id="student-course-list" class="course-list" aria-live="polite"></div>
+            </section>
+            <section id="student-upcoming-classes" class="student-dashboard-section student-dashboard-view" aria-labelledby="student-classes-title" hidden>
+              <div class="student-dashboard-section-heading">
+                <div><p class="micro-label">Learn together</p><h2 id="student-classes-title">Upcoming live classes</h2></div>
+                <span class="student-section-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2" /><path d="m10 9 5 3-5 3z" /></svg></span>
+              </div>
+              <div id="student-live-class-list" class="live-class-list" aria-live="polite"></div>
+              <h3>Timetable classes</h3>
+              <div class="collaboration-schedule-list" data-collab-live-classes aria-live="polite"></div>
+            </section>
+            <section id="student-timetable" class="student-dashboard-section student-dashboard-view" aria-labelledby="student-timetable-title" hidden>
+              <div class="student-dashboard-section-heading">
+                <div><p class="micro-label">Weekly schedule</p><h2 id="student-timetable-title">My Timetable</h2></div>
+                <button class="small-action" type="button" data-collab-refresh="schedule">Refresh</button>
+              </div>
+              <p class="admin-intro">Approved teaching times for the courses you are enrolled in.</p>
+              <div class="collaboration-schedule-list" data-collab-timetable aria-live="polite"></div>
+            </section>
+            <section id="student-attendance" class="student-dashboard-section student-dashboard-view" aria-labelledby="student-attendance-title" hidden>
+              <div class="student-dashboard-section-heading">
+                <div><p class="micro-label">Your class record</p><h2 id="student-attendance-title">Attendance</h2></div>
+                <button class="small-action" type="button" data-collab-refresh="schedule" data-student-progress-refresh>Refresh</button>
+              </div>
+              <div class="collaboration-attendance-summary" data-collab-attendance-summary aria-live="polite"></div>
+              <div class="student-learning-progress" data-student-learning-progress aria-live="polite">
+                <div class="student-learning-progress-heading">
+                  <h3>Course performance rate</h3>
+                  <p>Each week is scored out of 100% from teacher-approved daily answers.</p>
+                </div>
+                <p class="admin-empty">Loading your approved course progress…</p>
+              </div>
+              <div class="student-roster-toolbar collaboration-period-filter" role="group" aria-label="Attendance period">
+                <button class="small-action is-selected" type="button" data-attendance-period="this-week">This Week</button>
+                <button class="small-action" type="button" data-attendance-period="next-week">Next Week</button>
+                <button class="small-action" type="button" data-attendance-period="this-month">This Month</button>
+                <button class="small-action" type="button" data-attendance-period="next-month">Next Month</button>
+              </div>
+              <div class="collaboration-schedule-list" data-collab-attendance aria-live="polite"></div>
+            </section>
+            <section id="student-recordings" class="student-dashboard-section student-dashboard-view" aria-labelledby="student-recordings-title" hidden>
+              <div class="student-dashboard-section-heading">
+                <div><p class="micro-label">Class library</p><h2 id="student-recordings-title">Recorded classes</h2></div>
+                <button class="small-action" type="button" data-collab-refresh="recordings">Refresh</button>
+              </div>
+              <p class="admin-intro">Watch recordings from approved classes for your enrolled courses.</p>
+              <div class="collaboration-recording-list" data-collab-recordings aria-live="polite"></div>
+            </section>
           </div>
         </div>
-        <p class="admin-message" id="student-course-message" role="status" aria-live="polite"></p>
-        <div id="student-course-list" class="course-list" aria-live="polite"></div>
+      </section>
+
+      <section id="student-messages" class="admin-panel enrollment-panel message-center user-message-center" data-message-center="user" aria-labelledby="student-messages-heading" hidden>
+        <div class="collaboration-messages" data-collaboration-root data-collaboration-role="learner">
+          <div class="admin-panel-heading">
+            <div><p class="micro-label">Private course conversations</p><h2>Messages</h2></div>
+            <button class="small-action" type="button" data-collab-refresh="contacts">Refresh</button>
+          </div>
+          <p class="admin-intro">Message the administrator, your course tutor or a classmate from an enrolled course.</p>
+          <div class="collaboration-chat-layout">
+            <aside class="collaboration-contact-panel" aria-label="People you can message">
+              <label for="student-chat-search">Find a person</label>
+              <input id="student-chat-search" type="search" data-collab-search placeholder="Search people or courses">
+              <div class="collaboration-contact-list" data-collab-contacts aria-live="polite"></div>
+            </aside>
+            <section class="collaboration-chat-panel" aria-label="Conversation">
+              <div class="collaboration-chat-heading" data-collab-chat-heading>
+                <strong>Select someone to start a conversation</strong>
+              </div>
+              <div class="collaboration-chat-thread" data-collab-thread aria-live="polite"></div>
+              <form class="collaboration-chat-composer" data-collab-form>
+                <label class="sr-only" for="student-chat-body">Message</label>
+                <textarea id="student-chat-body" data-collab-body maxlength="2000" rows="3" placeholder="Write a message" disabled></textarea>
+                <div class="collaboration-composer-actions">
+                  <label class="small-action" for="student-chat-files">Attach files</label>
+                  <input id="student-chat-files" data-collab-files type="file" accept=".pdf,.doc,.docx,.jpg,.jpeg,.png,.webp,.mp4,.mov,.webm,.mp3,.wav,.m4a,.ogg" multiple disabled>
+                  <button class="small-action" type="button" data-collab-record disabled>Record voice note</button>
+                  <button class="button button-orange" type="submit" data-collab-send disabled>Send</button>
+                </div>
+                <p class="admin-field-hint">Up to five files · 25 MB per file. Voice notes are recorded in your browser.</p>
+                <div class="collaboration-file-list" data-collab-file-list></div>
+                <p class="admin-message" data-collab-status role="status" aria-live="polite"></p>
+              </form>
+            </section>
+          </div>
+          <button class="small-action collaboration-admin-contact" type="button" data-collab-admin-contact>Message the administrator</button>
+        </div>
+        <div class="admin-panel-heading message-center-header">
+          <div class="message-center-title">
+            <span class="message-center-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24"><path d="M20 11.5a7.5 7.5 0 0 1-7.5 7.5 8 8 0 0 1-3.5-.8L4 20l1.5-4A7.5 7.5 0 1 1 20 11.5Z" /><path d="M8 11h8m-8 3h5" /></svg>
+            </span>
+            <div>
+              <p class="micro-label">Private support conversation</p>
+              <h2 id="student-messages-heading">Messages with the TGFVP team</h2>
+            </div>
+          </div>
+          <button class="small-action message-refresh" type="button" data-message-refresh>Refresh messages</button>
+        </div>
+        <details class="collaboration-support-details">
+          <summary>Administrator support inbox</summary>
+          <p class="admin-intro">Send a private message to the administrator. You can attach up to five supported files to one message.</p>
+          <div class="message-thread" data-message-thread aria-live="polite"></div>
+          <form class="admin-form message-composer" data-message-form>
+          <label for="student-message-body">Message</label>
+          <textarea id="student-message-body" data-message-body maxlength="2000" rows="3" placeholder="Write an optional message or describe your attachments"></textarea>
+          <label class="message-file-picker" for="student-message-files">Attach files</label>
+          <input id="student-message-files" data-message-files type="file" accept=".pdf,.doc,.docx,.jpg,.jpeg,.png,.webp,.mp4,.mov,.webm,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,image/jpeg,image/png,image/webp,video/mp4,video/quicktime,video/webm" multiple>
+          <p class="admin-field-hint message-limits" data-message-limits></p>
+          <div class="message-attachment-previews" data-message-previews aria-live="polite"></div>
+          <progress class="message-upload-progress" data-message-progress max="100" value="0" hidden></progress>
+          <p class="admin-message" data-message-status role="status" aria-live="polite"></p>
+            <button class="button button-orange" type="submit" data-message-send disabled>Send message <span aria-hidden="true">↗</span></button>
+          </form>
+        </details>
       </section>
 
       <section class="lesson-panel" id="student-lesson-panel" hidden aria-labelledby="student-lesson-title">
@@ -76,6 +324,8 @@
           <button class="button button-quiet" id="close-student-lesson" type="button">Back to pathway</button>
         </div>
         <article class="lesson-content" id="student-lesson-content"></article>
+        <p class="module-study-guidance" id="student-module-study-guidance" hidden></p>
+        <section class="module-week-list" id="student-module-weeks" aria-label="Four-week learning plan" hidden></section>
         <div class="class-whiteboard student-whiteboard">
           <div class="whiteboard-heading"><div><p class="micro-label">Classroom workspace</p><h3>Shared whiteboard</h3></div><span>Teacher-led</span></div>
           <canvas id="student-board-canvas" class="whiteboard-canvas" aria-label="Shared classroom whiteboard"></canvas>

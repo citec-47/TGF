@@ -23,10 +23,25 @@
           <span class="brand-mark">TGF<span>VP</span><i aria-hidden="true">›</i></span>
           <span class="brand-caption">Admin<br>Dashboard</span>
         </a>
-        <a class="text-link admin-public-link" href="/portal">Team portal <span aria-hidden="true">↗</span></a>
-        <a class="text-link admin-public-link" href="/teacher">Teacher studio <span aria-hidden="true">↗</span></a>
-        <a class="text-link admin-public-link" href="/">View public website <span aria-hidden="true">↗</span></a>
-        <button class="button button-dark admin-sign-out" id="sign-out" type="button" hidden>Sign out</button>
+        <div class="admin-header-actions">
+          <button
+            class="admin-theme-toggle"
+            id="admin-theme-toggle"
+            type="button"
+            aria-label="Switch to dark mode"
+            aria-pressed="false"
+            title="Switch to dark mode"
+          >
+            <svg class="icon-moon" viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M20.2 15.4A8.5 8.5 0 0 1 8.6 3.8 8.6 8.6 0 1 0 20.2 15.4Z"></path>
+            </svg>
+            <svg class="icon-sun" viewBox="0 0 24 24" aria-hidden="true">
+              <circle cx="12" cy="12" r="4"></circle>
+              <path d="M12 2v2m0 16v2M4.93 4.93l1.42 1.42m11.3 11.3 1.42 1.42M2 12h2m16 0h2M4.93 19.07l1.42-1.42m11.3-11.3 1.42-1.42"></path>
+            </svg>
+          </button>
+          <button class="button button-dark admin-sign-out" id="sign-out" type="button" hidden>Sign out</button>
+        </div>
       </div>
     </header>
 
@@ -46,14 +61,285 @@
       <section id="dashboard-panel" hidden>
         <div class="admin-heading">
           <div>
-            <p class="eyebrow"><span></span> Website management</p>
-            <h1>TGF Group<br><em>dashboard.</em></h1>
+            <p class="eyebrow"><span></span> TGF VOCATIONAL PATHWAYS</p>
+            <h1>Admin dashboard</h1>
           </div>
-          <p class="admin-intro" id="admin-welcome">Manage staff accounts, TGFVP locations and public website settings. Changes are saved to the database.</p>
+          <p class="admin-intro" id="admin-welcome">Manage enrollment, learning programmes, locations, team accounts and public website settings.</p>
         </div>
 
-        <div class="admin-workspace">
-          <section class="admin-panel locations-panel" aria-labelledby="locations-heading">
+        <div class="admin-dashboard-layout">
+          <aside class="admin-sidebar" aria-label="Dashboard navigation">
+            <p class="micro-label">Dashboard</p>
+            <nav id="admin-sidebar-nav" aria-label="Management sections">
+              <button class="is-active" type="button" data-admin-view="overview" aria-current="page">Overview</button>
+              <button type="button" data-admin-view="pending-accounts">Pending Accounts <span id="pending-accounts-nav-count" hidden></span></button>
+              <button type="button" data-admin-view="enrollments">Enrollment approvals <span id="enrollment-nav-count" hidden></span></button>
+              <button type="button" data-admin-view="payments">Payments &amp; receipts <span id="payment-nav-count" hidden></span></button>
+              <button type="button" data-admin-view="materials">Learning materials review</button>
+              <button type="button" data-admin-view="weekly-timetables">Weekly timetable approvals</button>
+              <button type="button" data-admin-view="general-classes">General Classes</button>
+              <button type="button" data-admin-view="teacher-profiles">Teacher profiles</button>
+              <button type="button" data-admin-view="messages">Messages <span id="admin-messages-nav-count" hidden></span></button>
+              <button type="button" data-admin-view="attendance">Weekly attendance</button>
+              <button type="button" data-admin-view="trash">Trash</button>
+              <button type="button" data-admin-view="locations">Locations</button>
+              <button type="button" data-admin-view="board">Board profiles</button>
+              <button type="button" data-admin-view="learning">Courses and modules</button>
+              <button type="button" data-admin-view="students">Students</button>
+              <button type="button" data-admin-view="accounts">All members</button>
+              <button type="button" data-admin-view="website">Flyer and intake</button>
+              <button type="button" data-admin-view="corporate-content">Corporate content</button>
+              <button type="button" data-admin-view="public-submissions">Website submissions <span id="public-submissions-nav-count" hidden></span></button>
+            </nav>
+            <div class="admin-sidebar-links">
+              <p class="micro-label">TGF Group</p>
+              <a href="/portal">Team portal <span aria-hidden="true">↗</span></a>
+              <a href="/teacher">Teacher studio <span aria-hidden="true">↗</span></a>
+              <a href="/">Public website <span aria-hidden="true">↗</span></a>
+            </div>
+          </aside>
+          <div class="admin-dashboard-content">
+            <div class="credential-card" id="account-credential" role="status" hidden>
+              <div>
+                <strong id="credential-name"></strong>
+                <p id="credential-password-hint">Share these login details securely. The temporary password is shown only once and must be changed at first sign-in.</p>
+                <p>Email: <code id="credential-email"></code></p>
+                <a id="credential-login-link" href="/teacher">Teacher sign-in</a>
+              </div>
+              <code id="credential-password"></code>
+              <button class="small-action" id="copy-credential" type="button">Copy login details</button>
+              <button class="small-action" id="dismiss-credential" type="button">Hide</button>
+              <p class="admin-message" id="credential-message" role="status" aria-live="polite"></p>
+            </div>
+            <section class="admin-overview" data-admin-view-panel="overview" aria-labelledby="overview-heading">
+              <div class="admin-view-heading">
+                <div><p class="micro-label">At a glance</p><h2 id="overview-heading">Overview</h2></div>
+                <button class="small-action" id="refresh-overview" type="button">Refresh overview</button>
+              </div>
+              <p class="admin-message" id="overview-message" role="status" aria-live="polite">Loading dashboard overview…</p>
+              <div class="admin-overview-stats" aria-label="Platform statistics" aria-busy="true">
+                <article class="admin-stat"><span>Registered students</span><strong id="overview-student-count">—</strong><small>Learner accounts</small></article>
+                <article class="admin-stat"><span>Pending account approvals</span><strong id="overview-pending-account-count">—</strong><small>Awaiting review</small></article>
+                <article class="admin-stat"><span>Courses &amp; programmes</span><strong id="overview-programme-count">—</strong><small>All learning pathways</small></article>
+                <article class="admin-stat"><span>Instructors &amp; team</span><strong id="overview-team-count">—</strong><small>Active team accounts</small></article>
+                <article class="admin-stat"><span>Pending enrollments</span><strong id="overview-enrollment-count">—</strong><small>Waiting for review</small></article>
+                <article class="admin-stat"><span>Active locations</span><strong id="overview-location-count">—</strong><small>Training centres</small></article>
+              </div>
+              <div class="admin-overview-sections">
+                <section class="admin-overview-section" aria-labelledby="overview-tasks-heading">
+                  <div class="admin-overview-section-heading">
+                    <div><p class="micro-label">Needs attention</p><h3 id="overview-tasks-heading">Pending tasks</h3></div>
+                  </div>
+                  <div class="admin-task-list" id="overview-tasks" aria-live="polite">
+                    <p class="admin-empty">Checking for pending tasks…</p>
+                  </div>
+                </section>
+                <section class="admin-overview-section" aria-labelledby="overview-activity-heading">
+                  <div class="admin-overview-section-heading">
+                    <div><p class="micro-label">Latest updates</p><h3 id="overview-activity-heading">Recent activity</h3></div>
+                  </div>
+                  <div class="admin-activity-list" id="overview-activity" aria-live="polite">
+                    <p class="admin-empty">Loading recent activity…</p>
+                  </div>
+                </section>
+              </div>
+              <div class="admin-overview-actions">
+                <div><p class="micro-label">Quick access</p><h3>Frequently used</h3></div>
+                <div class="admin-quick-links">
+                  <button type="button" data-admin-view="pending-accounts">Review account approvals <span aria-hidden="true">↗</span></button>
+                  <button type="button" data-admin-view="enrollments">Review enrollment requests <span aria-hidden="true">↗</span></button>
+                  <button type="button" data-admin-view="payments">View all payment receipts <span aria-hidden="true">↗</span></button>
+                  <button type="button" data-admin-view="learning">Manage courses and modules <span aria-hidden="true">↗</span></button>
+                  <button type="button" data-admin-view="students">Open student roster <span aria-hidden="true">↗</span></button>
+                </div>
+              </div>
+            </section>
+
+            <section class="admin-panel enrollment-panel" id="admin-pending-accounts" data-admin-view-panel="pending-accounts" aria-labelledby="pending-accounts-heading" hidden>
+              <div class="admin-panel-heading">
+                <div><p class="micro-label">New registrations</p><h2 id="pending-accounts-heading">Pending Accounts <span id="pending-accounts-count"></span></h2></div>
+                <button class="small-action" id="refresh-pending-accounts" type="button">Refresh</button>
+              </div>
+              <p class="admin-intro">Approve learner access or reject a registration with a reason the student can review.</p>
+              <p class="admin-message" id="pending-accounts-message" role="status" aria-live="polite"></p>
+              <div class="admin-user-list" id="pending-accounts-list" aria-live="polite"></div>
+            </section>
+
+            <section class="admin-panel enrollment-panel" id="admin-enrollments" data-admin-view-panel="enrollments" aria-labelledby="enrollments-heading" hidden>
+              <div class="admin-panel-heading">
+                <div><p class="micro-label">Learner requests</p><h2 id="enrollments-heading">Enrollment approvals <span id="enrollment-count"></span></h2></div>
+              </div>
+              <p class="admin-intro">Review each request before a learner can open their learning dashboard.</p>
+              <p class="admin-message" id="enrollment-message" role="status" aria-live="polite"></p>
+              <div class="admin-user-list" id="enrollment-request-list" aria-live="polite"></div>
+            </section>
+
+            <section class="admin-panel enrollment-panel" id="admin-payments" data-admin-view-panel="payments" aria-labelledby="payments-heading" hidden>
+              <div class="admin-panel-heading">
+                <div><p class="micro-label">Review student payment evidence</p><h2 id="payments-heading">Payment management</h2></div>
+                <button class="small-action" id="refresh-payments" type="button">Refresh</button>
+              </div>
+              <p class="admin-intro">Open each receipt before reviewing it. Approved payments update the learner’s balance. If you decline one, your reason will show on the learner dashboard.</p>
+              <div class="admin-overview-stats payment-summary" aria-label="Payment summary">
+                <article class="admin-stat"><span>Fully paid</span><strong id="payment-full-count">—</strong><small>Enrollments with no balance</small></article>
+                <article class="admin-stat"><span>Owing</span><strong id="payment-owing-count">—</strong><small>Outstanding balances</small></article>
+                <article class="admin-stat"><span>Pending verification</span><strong id="payment-pending-count">—</strong><small>Unverified receipt submissions</small></article>
+                <article class="admin-stat"><span>Total outstanding</span><strong id="payment-outstanding-total">—</strong><small>XAF across enrollments</small></article>
+              </div>
+              <div class="student-roster-toolbar payment-list-toolbar">
+                <label for="payment-status-filter">Enrollment balance</label>
+                <select id="payment-status-filter">
+                  <option value="all">All balances</option>
+                  <option value="full">Fully paid</option>
+                  <option value="owing">Owing</option>
+                  <option value="pending">Pending verification</option>
+                </select>
+                <label for="payment-search">Search records</label>
+                <input id="payment-search" type="search" placeholder="Student, programme, or receipt">
+              </div>
+              <section class="payment-receipts-panel" aria-labelledby="payment-receipts-heading">
+                <div class="admin-panel-heading">
+                  <div><p class="micro-label">Submitted evidence</p><h3 id="payment-receipts-heading">Student receipts <span id="payment-receipt-count">0</span></h3></div>
+                </div>
+                <div class="student-roster-toolbar payment-receipt-toolbar">
+                  <label for="payment-receipt-status-filter">Receipt status</label>
+                  <select id="payment-receipt-status-filter">
+                    <option value="all">All receipts</option>
+                    <option value="pending">Awaiting review</option>
+                    <option value="approved">Approved</option>
+                    <option value="rejected">Rejected</option>
+                  </select>
+                </div>
+                <div class="admin-user-list" id="payment-receipt-list" aria-live="polite"></div>
+              </section>
+              <section class="payment-enrollments-panel" aria-labelledby="payment-enrollments-heading">
+                <div class="admin-panel-heading">
+                  <div><p class="micro-label">Fee tracking</p><h3 id="payment-enrollments-heading">Learner balances <span id="payment-record-count">0</span></h3></div>
+                </div>
+                <p class="admin-message" id="payments-message" role="status" aria-live="polite"></p>
+                <div class="admin-user-list" id="payment-management-list" aria-live="polite"></div>
+              </section>
+            </section>
+
+            <section class="admin-panel enrollment-panel" id="admin-materials" data-admin-view-panel="materials" aria-labelledby="materials-heading" hidden>
+              <div class="admin-panel-heading">
+                <div><p class="micro-label">Teaching resources</p><h2 id="materials-heading">Learning materials review <span id="materials-count"></span></h2></div>
+                <button class="small-action" id="refresh-materials" type="button">Refresh</button>
+              </div>
+              <p class="admin-intro">Review private course resources. Choose a generated module and one of its four weekly blocks before approving each resource.</p>
+              <p class="admin-message" id="materials-message" role="status" aria-live="polite"></p>
+              <div class="admin-user-list" id="admin-material-list" aria-live="polite"></div>
+            </section>
+
+            <section class="admin-panel enrollment-panel" id="admin-timetables" data-admin-view-panel="timetables" aria-labelledby="timetables-heading" hidden>
+              <div class="admin-panel-heading">
+                <div><p class="micro-label">Academic administration</p><h2 id="timetables-heading">Timetable approvals</h2></div>
+                <button class="small-action" id="refresh-timetables" type="button">Refresh</button>
+              </div>
+              <p class="admin-intro">Review proposed classes, check their delivery details, and keep published schedules accurate.</p>
+              <div class="student-roster-toolbar">
+                <label for="timetable-status-filter">Status</label>
+                <select id="timetable-status-filter">
+                  <option value="all">All active schedules</option>
+                  <option value="pending">Awaiting review</option>
+                  <option value="approved">Approved</option>
+                  <option value="rejected">Declined</option>
+                </select>
+                <label for="timetable-search">Search</label>
+                <input id="timetable-search" type="search" placeholder="Class, teacher, course, location">
+              </div>
+              <p class="admin-message" id="timetable-message" role="status" aria-live="polite"></p>
+              <div class="admin-user-list" id="admin-timetable-list" aria-live="polite"></div>
+            </section>
+
+            <section class="admin-panel enrollment-panel" id="admin-teacher-profiles" data-admin-view-panel="teacher-profiles" aria-labelledby="teacher-profiles-heading" hidden>
+              <div class="admin-panel-heading">
+                <div><p class="micro-label">Teaching team</p><h2 id="teacher-profiles-heading">Teacher profiles</h2></div>
+                <button class="small-action" id="refresh-teacher-profiles" type="button">Refresh</button>
+              </div>
+              <p class="admin-intro">Create teacher logins, set or change their passwords, and preview tutor-submitted information. Choose whether each profile appears beside the teacher's assigned classes.</p>
+              <form class="admin-form account-create-form" id="teacher-account-form">
+                <h3>Create teacher account</h3>
+                <p class="admin-intro">Choose the teacher's initial password. Use at least 14 characters and share it securely.</p>
+                <div class="admin-form-grid">
+                  <div><label for="teacher-account-name">Teacher full name</label><input id="teacher-account-name" name="fullName" maxlength="120" autocomplete="name" required></div>
+                  <div><label for="teacher-account-email">Teacher email address</label><input id="teacher-account-email" name="email" type="email" maxlength="254" autocomplete="email" required></div>
+                  <div><label for="teacher-account-password">Password</label><input id="teacher-account-password" name="password" type="password" minlength="14" maxlength="1024" autocomplete="new-password" required></div>
+                  <div><label for="teacher-account-password-confirm">Confirm password</label><input id="teacher-account-password-confirm" name="confirmPassword" type="password" minlength="14" maxlength="1024" autocomplete="new-password" required></div>
+                </div>
+                <p class="admin-message" id="teacher-account-form-message" role="alert" aria-live="polite"></p>
+                <button class="button button-orange" type="submit">Create teacher login <span aria-hidden="true">↗</span></button>
+              </form>
+              <p class="admin-message" id="teacher-profiles-message" role="status" aria-live="polite"></p>
+              <div class="admin-user-list" id="admin-teacher-profile-list" aria-live="polite"></div>
+            </section>
+
+            <section class="admin-panel enrollment-panel" id="admin-weekly-timetables" data-admin-view-panel="weekly-timetables" aria-labelledby="weekly-timetables-heading" hidden>
+              <div class="admin-panel-heading">
+                <div><p class="micro-label">Recurring course schedules</p><h2 id="weekly-timetables-heading">Weekly timetable approvals</h2></div>
+                <button class="small-action" type="button" data-collab-refresh="timetable">Refresh</button>
+              </div>
+              <p class="admin-intro">Review tutors’ weekday schedules. Approving a replacement schedule updates the timetable for enrolled students.</p>
+              <p class="admin-message" data-collab-admin-timetable-status role="status" aria-live="polite"></p>
+              <div class="admin-user-list" data-collab-admin-timetables aria-live="polite"></div>
+            </section>
+
+            <section class="admin-panel enrollment-panel" id="admin-general-classes" data-admin-view-panel="general-classes" aria-labelledby="general-classes-heading" hidden>
+              <div class="admin-panel-heading">
+                <div><p class="micro-label">Class recordings</p><h2 id="general-classes-heading">General Classes</h2></div>
+                <button class="small-action" type="button" data-collab-refresh="recordings">Refresh</button>
+              </div>
+              <p class="admin-intro">Browse recordings by course and class date. Recordings become available after the class ends and processing finishes.</p>
+              <div class="collaboration-recording-list" data-collab-admin-recordings aria-live="polite"></div>
+            </section>
+
+            <section class="admin-panel enrollment-panel" id="admin-attendance" data-admin-view-panel="attendance" aria-labelledby="attendance-heading" hidden>
+              <div class="admin-panel-heading">
+                <div><p class="micro-label">Platform activity</p><h2 id="attendance-heading">Weekly attendance</h2></div>
+                <button class="small-action" id="refresh-attendance" type="button">Refresh</button>
+              </div>
+              <p class="admin-intro">Review recent platform access across members, students and teaching staff using authenticated activity timestamps and a 10-minute inactivity threshold.</p>
+              <div class="student-roster-toolbar">
+                <label for="attendance-category-filter">Category</label>
+                <select id="attendance-category-filter">
+                  <option value="all">All categories</option>
+                  <option value="learner">Students</option>
+                  <option value="teacher">Teachers</option>
+                  <option value="member">Members</option>
+                </select>
+                <label for="attendance-period-filter">Period</label>
+                <select id="attendance-period-filter">
+                  <option value="today">Today</option>
+                  <option value="week" selected>Weekly</option>
+                  <option value="month">Monthly</option>
+                  <option value="year">Yearly</option>
+                </select>
+                <label for="attendance-status-filter">Presence</label>
+                <select id="attendance-status-filter">
+                  <option value="all">All users</option>
+                  <option value="online">Online now</option>
+                  <option value="recently-active">Recently active</option>
+                  <option value="offline">Offline</option>
+                </select>
+                <label for="attendance-search">Search</label>
+                <input id="attendance-search" type="search" placeholder="Name or email">
+              </div>
+              <p class="admin-message" id="attendance-message" role="status" aria-live="polite"></p>
+              <div class="admin-user-list" id="admin-activity-list" aria-live="polite"></div>
+            </section>
+
+            <section class="admin-panel enrollment-panel" id="admin-trash" data-admin-view-panel="trash" aria-labelledby="trash-heading" hidden>
+              <div class="admin-panel-heading">
+                <div><p class="micro-label">Recoverable records</p><h2 id="trash-heading">Trash</h2></div>
+                <button class="small-action" id="refresh-trash" type="button">Refresh</button>
+              </div>
+              <p class="admin-intro">Restore deleted records from here. Courses moved here keep their generated learning, enrollment, and payment history so they can be restored.</p>
+              <p class="admin-message" id="trash-message" role="status" aria-live="polite"></p>
+              <div class="admin-user-list" id="admin-trash-list" aria-live="polite"></div>
+            </section>
+
+        <div class="admin-workspace" id="admin-workspace" data-admin-view-panel="locations" hidden>
+          <section class="admin-panel locations-panel" id="admin-locations" aria-labelledby="locations-heading">
             <div class="admin-panel-heading">
               <div>
                 <p class="micro-label">Manage locations</p>
@@ -117,7 +403,7 @@
           </section>
         </div>
 
-        <section class="admin-panel accounts-panel" aria-labelledby="board-heading">
+        <section class="admin-panel accounts-panel" id="admin-board" data-admin-view-panel="board" aria-labelledby="board-heading" hidden>
           <div class="admin-panel-heading">
             <div><p class="micro-label">Board and governance</p><h2 id="board-heading">TGF Group board profiles <span id="board-count"></span></h2></div>
             <button class="button button-dark add-location" id="new-board-member" type="button"><span aria-hidden="true">+</span> Add profile</button>
@@ -147,14 +433,24 @@
           </form>
         </section>
 
-        <section class="admin-panel site-settings-panel" aria-labelledby="course-heading">
+        <section class="admin-panel site-settings-panel" id="admin-learning" data-admin-view-panel="learning" aria-labelledby="course-heading" hidden>
           <div class="admin-panel-heading"><div><p class="micro-label">Learning platform</p><h2 id="course-heading">Courses and module releases</h2></div></div>
+          <p class="admin-intro">To assign a course, choose an active teacher in that course's “Assigned teacher” field and click “Save assignment.” The teacher can then upload course content for Admin review. If no teacher is listed, create or activate a teacher account under Teacher profiles first.</p>
           <p class="admin-intro">Manage programs, their ordered modules, learner access and module-by-module progression. A locked module remains unavailable until an administrator releases it and its prerequisites are completed.</p>
           <p class="admin-message" id="course-message" role="status" aria-live="polite"></p>
           <div class="course-admin-list" id="course-admin-list"></div>
+          <section class="course-submission-review" aria-labelledby="course-submission-review-title">
+            <div class="admin-panel-heading">
+              <div><p class="micro-label">Teacher uploads</p><h3 id="course-submission-review-title">Course curriculum review</h3></div>
+              <button class="small-action" id="refresh-course-submissions" type="button">Refresh submissions</button>
+            </div>
+            <p class="admin-intro">Choose the course duration, generate student-ready weekly lessons from the uploaded document, review the draft, then approve it to release the first module. OpenAI drafting requires <code>OPENAI_API_KEY</code> in the server environment.</p>
+            <p class="admin-message" id="course-submissions-message" role="status" aria-live="polite"></p>
+            <div class="admin-user-list" id="course-submission-list" aria-live="polite"></div>
+          </section>
           <form class="admin-form account-create-form" id="programme-form">
             <h3>Add a programme</h3>
-            <div class="admin-form-grid"><div><label for="programme-title">Programme title</label><input id="programme-title" maxlength="120" required></div><div><label for="programme-order">Display order</label><input id="programme-order" type="number" min="0" max="9999" value="10" required></div></div>
+            <div class="admin-form-grid"><div><label for="programme-title">Programme title</label><input id="programme-title" maxlength="120" required></div><div><label for="programme-order">Display order</label><input id="programme-order" type="number" min="0" max="9999" value="10" required></div><div><label for="programme-registration-fee">Registration fee (XAF)</label><input id="programme-registration-fee" type="number" min="0" max="9007199254740991" step="1" value="0" required></div></div>
             <label for="programme-description">Description</label><textarea id="programme-description" maxlength="2000" rows="2"></textarea>
             <button class="button button-dark" type="submit">Add programme <span aria-hidden="true">↗</span></button>
           </form>
@@ -172,58 +468,372 @@
           </form>
         </section>
 
-        <section class="admin-panel accounts-panel" aria-labelledby="accounts-heading">
+        <section class="admin-students-view" id="admin-students" data-admin-view-panel="students" aria-labelledby="students-heading" hidden>
+          <div class="admin-view-heading">
+            <div><p class="micro-label">Learner registrations</p><h2 id="students-heading">Students</h2></div>
+            <button class="small-action" id="refresh-students" type="button" aria-label="Refresh student registrations">Refresh</button>
+          </div>
+          <p class="admin-intro">Recent registrations appear first. Class status reflects activity in the TGFVP live-class room and expires when the student leaves or disconnects.</p>
+          <p class="admin-message" id="students-message" role="status" aria-live="polite"></p>
+          <div class="admin-overview-stats student-roster-stats">
+            <article class="admin-stat"><span>Registered students</span><strong id="student-total-count">0</strong><small>All learner accounts</small></article>
+            <article class="admin-stat"><span>Registered this week</span><strong id="student-recent-count">0</strong><small>New learner accounts</small></article>
+            <article class="admin-stat"><span>In class now</span><strong id="student-in-class-count">0</strong><small>Active platform presence</small></article>
+          </div>
+          <div class="student-roster-toolbar">
+            <label for="student-search">Search students</label>
+            <input id="student-search" type="search" placeholder="Name or email">
+            <label for="student-programme-filter">Programme group</label>
+            <select id="student-programme-filter"><option value="all">All programmes</option></select>
+            <label for="student-status-filter">Status</label>
+            <select id="student-status-filter">
+              <option value="all">All students</option>
+              <option value="in-class">In class now</option>
+              <option value="active">Active account</option>
+              <option value="suspended">Suspended</option>
+            </select>
+          </div>
+          <div class="student-roster-list" id="admin-student-list" aria-live="polite"></div>
+          <section class="student-module-controls" id="student-module-controls" aria-labelledby="student-module-heading" hidden>
+            <div class="admin-panel-heading">
+              <div><p class="micro-label">Individual access</p><h3 id="student-module-heading">Module access</h3></div>
+              <button class="small-action" id="close-student-modules" type="button" aria-label="Close module access panel">Close</button>
+            </div>
+            <p class="admin-message" id="student-module-message" role="status" aria-live="polite"></p>
+            <div class="student-module-list" id="admin-student-module-list"></div>
+          </section>
+        </section>
+
+        <section class="admin-panel accounts-panel" id="admin-accounts" data-admin-view-panel="accounts" aria-labelledby="accounts-heading" hidden>
           <div class="admin-panel-heading">
             <div>
               <p class="micro-label">People and permissions</p>
-              <h2 id="accounts-heading">Team accounts <span id="account-count"></span></h2>
+              <h2 id="accounts-heading">All platform members <span id="account-count"></span></h2>
             </div>
           </div>
-          <p class="admin-intro">Create access, assign organizational roles, freeze or restore accounts, reset a password, or remove access.</p>
+          <p class="admin-intro">Manage every registered member, assign roles, suspend or restore access, reset passwords, or remove accounts.</p>
           <p class="admin-message" id="account-message" role="status" aria-live="polite"></p>
-          <div class="credential-card" id="account-credential" role="status" hidden>
-            <div><strong id="credential-name"></strong><p>Share this temporary password securely. It is not saved for later viewing.</p></div>
-            <code id="credential-password"></code>
-            <button class="small-action" id="copy-credential" type="button">Copy password</button>
-            <button class="small-action" id="dismiss-credential" type="button">Hide</button>
+          <div class="student-roster-toolbar member-filters">
+            <label for="member-search">Search members</label>
+            <input id="member-search" type="search" placeholder="Name or email">
+            <label for="member-role-filter">Role</label>
+            <select id="member-role-filter"><option value="all">All roles</option></select>
+            <label for="member-subsidiary-filter">Company or team</label>
+            <select id="member-subsidiary-filter"><option value="all">All companies and teams</option></select>
           </div>
           <div class="admin-user-list" id="admin-user-list" aria-live="polite"></div>
           <form class="admin-form account-create-form" id="account-form">
-            <h3>Create a team account</h3>
+            <h3>Create a platform account</h3>
             <div class="admin-form-grid">
               <div><label for="account-name">Full name</label><input id="account-name" name="fullName" maxlength="120" autocomplete="name" required></div>
               <div><label for="account-email">Email address</label><input id="account-email" name="email" type="email" maxlength="254" autocomplete="email" required></div>
               <div><label for="account-role">Organizational role</label><select id="account-role" name="role" required></select></div>
               <div><label for="account-subsidiary">Company or team</label><select id="account-subsidiary" name="subsidiary" required></select></div>
+              <div><label for="account-password">Password (optional)</label><input id="account-password" name="password" type="password" minlength="14" maxlength="1024" autocomplete="new-password"></div>
+              <div><label for="account-password-confirm">Confirm password</label><input id="account-password-confirm" name="confirmPassword" type="password" minlength="14" maxlength="1024" autocomplete="new-password"></div>
             </div>
-            <p class="admin-field-hint">A temporary password is created once. Share it directly and ask the person to change it at first sign-in.</p>
+            <p class="admin-field-hint">Set your own password or leave both password fields blank to generate a temporary password that must be changed at first sign-in.</p>
             <p class="admin-message" id="account-form-message" role="alert" aria-live="polite"></p>
             <button class="button button-orange" type="submit">Create account <span aria-hidden="true">↗</span></button>
           </form>
         </section>
 
-        <section class="admin-panel site-settings-panel" aria-labelledby="settings-heading">
+        <section class="admin-panel site-settings-panel" id="admin-website" data-admin-view-panel="website" aria-labelledby="settings-heading" hidden>
           <div class="admin-panel-heading">
             <div>
               <p class="micro-label">Public website</p>
               <h2 id="settings-heading">Flyer and intake details</h2>
             </div>
           </div>
-          <p class="admin-intro">Update the TGFVP flyer, accent colour and training resumption date shown to visitors.</p>
+          <p class="admin-intro">Update the TGFVP flyer, the admission date printed on it, accent colour and training resumption details.</p>
           <form class="admin-form" id="settings-form">
             <div class="admin-form-grid">
+              <div><label for="flyer-date-text">Date shown on flyer</label><input id="flyer-date-text" name="flyerDateText" maxlength="64" required></div>
               <div><label for="resumption-label">Date label</label><input id="resumption-label" name="resumptionLabel" maxlength="100" required></div>
               <div><label for="resumption-date">Resumption date</label><input id="resumption-date" name="resumptionDate" type="date"></div>
               <div><label for="accent-color">Flyer accent colour</label><input id="accent-color" name="accentColor" type="color" value="#F47D20" required></div>
               <div><label for="flyer-file">Upload a replacement flyer</label><input id="flyer-file" name="flyer" type="file" accept="image/jpeg,image/png,image/webp"><span class="admin-field-hint">JPG, PNG or WebP · up to 8 MB</span></div>
             </div>
             <input id="flyer-image-url" name="flyerImageUrl" type="hidden">
-            <div class="photo-preview-wrap" id="flyer-preview-wrap" hidden><img id="flyer-preview" alt="Current TGFVP flyer preview"></div>
+            <div class="photo-preview-wrap flyer-preview-wrap" id="flyer-preview-wrap" hidden><img id="flyer-preview" alt="Current TGFVP flyer preview"><span id="flyer-preview-date" class="flyer-date-overlay" aria-hidden="true">AUGUST 1ST TO OCTOBER 30TH</span></div>
             <p class="admin-message" id="settings-message" role="status" aria-live="polite"></p>
             <button class="button button-orange" id="save-settings" type="submit">Save website settings <span aria-hidden="true">↗</span></button>
           </form>
+          <section class="flyer-history-panel" aria-labelledby="flyer-history-heading">
+            <div class="admin-panel-heading"><div><p class="micro-label">Previous versions</p><h3 id="flyer-history-heading">Flyer history</h3></div></div>
+            <p class="admin-intro">Restore a prior image and date by loading them into the form, then save to publish.</p>
+            <p class="admin-message" id="flyer-history-message" role="status" aria-live="polite"></p>
+            <div class="admin-user-list" id="flyer-history-list"></div>
+          </section>
         </section>
+        <section class="admin-panel enrollment-panel corporate-content-panel" id="admin-corporate-content" data-admin-view-panel="corporate-content" aria-labelledby="corporate-content-heading" hidden>
+          <div class="admin-panel-heading">
+            <div>
+              <p class="micro-label">Public website</p>
+              <h2 id="corporate-content-heading">Corporate content</h2>
+            </div>
+            <button class="small-action" id="load-corporate-content" type="button">Reload published content</button>
+          </div>
+          <p class="admin-intro">Edit the information shown on the TGF Group homepage. Publish verified company details only; blank contact details and website links remain unpublished.</p>
+          <div class="corporate-content-shortcuts" aria-label="Related website management">
+            <button class="small-action" type="button" data-admin-view="board">Manage team profiles</button>
+            <button class="small-action" type="button" data-admin-view="public-submissions">Review applications and enquiries</button>
+          </div>
+          <p class="admin-field-hint" id="corporate-content-updated">Published content has not been loaded.</p>
+          <form class="admin-form corporate-content-form" id="corporate-content-form">
+            <details class="corporate-content-group" open>
+              <summary>Homepage and About Us</summary>
+              <div class="corporate-content-fields">
+                <div><label for="corporate-hero-intro">Homepage introduction</label><textarea id="corporate-hero-intro" data-cms-field="heroIntro" maxlength="600" rows="3" required></textarea></div>
+                <div><label for="corporate-founded-date">Founding date</label><input id="corporate-founded-date" data-cms-field="foundedDate" maxlength="100"></div>
+                <div><label for="corporate-about-intro">About Us introduction</label><textarea id="corporate-about-intro" data-cms-field="about.intro" maxlength="1500" rows="4"></textarea></div>
+                <div><label for="corporate-vision">Vision</label><textarea id="corporate-vision" data-cms-field="about.vision" maxlength="1500" rows="2"></textarea></div>
+                <div><label for="corporate-mission">Mission</label><textarea id="corporate-mission" data-cms-field="about.mission" maxlength="1500" rows="2"></textarea></div>
+                <div><label for="corporate-objectives">Group objectives</label><textarea id="corporate-objectives" data-cms-text-list="about.objectives" rows="4"></textarea><span class="admin-field-hint">One objective per line. Leave empty until approved wording is available.</span></div>
+                <div class="corporate-content-list-field"><label>Core values</label><div data-cms-list="about.values"></div><button class="small-action" data-cms-add="about.values" type="button">Add a value</button></div>
+              </div>
+            </details>
+            <details class="corporate-content-group">
+              <summary>Subsidiaries</summary>
+              <p class="admin-field-hint">Add verified descriptions and official websites. Leave a website blank to keep that link unpublished.</p>
+              <div data-cms-list="subsidiaries"></div>
+              <button class="small-action" data-cms-add="subsidiaries" type="button">Add a subsidiary</button>
+            </details>
+            <details class="corporate-content-group">
+              <summary>TGFEA</summary>
+              <div class="corporate-content-fields">
+                <div><label for="corporate-tgfea-intro">Programme introduction</label><textarea id="corporate-tgfea-intro" data-cms-field="tgfea.intro" maxlength="2000" rows="4"></textarea></div>
+                <div><label for="corporate-tgfea-structure">Programme structure</label><textarea id="corporate-tgfea-structure" data-cms-field="tgfea.structure" maxlength="2000" rows="4"></textarea></div>
+                <div><label for="corporate-tgfea-schedule">Schedule</label><textarea id="corporate-tgfea-schedule" data-cms-field="tgfea.schedule" maxlength="2000" rows="2"></textarea></div>
+                <div><label for="corporate-tgfea-objectives">Programme objectives</label><textarea id="corporate-tgfea-objectives" data-cms-text-list="tgfea.objectives" rows="4"></textarea><span class="admin-field-hint">One objective per line.</span></div>
+                <div><label for="corporate-tgfea-awards">Award categories</label><textarea id="corporate-tgfea-awards" data-cms-text-list="tgfea.awardCategories" rows="8"></textarea><span class="admin-field-hint">One category per line.</span></div>
+              </div>
+            </details>
+            <details class="corporate-content-group">
+              <summary>TGF Vocational Pathways</summary>
+              <div class="corporate-content-fields">
+                <div><label for="corporate-tgfvp-intro">Programme introduction</label><textarea id="corporate-tgfvp-intro" data-cms-field="tgfvp.intro" maxlength="1500" rows="3"></textarea></div>
+                <div><label for="corporate-tgfvp-courses">Courses</label><textarea id="corporate-tgfvp-courses" data-cms-text-list="tgfvp.courses" rows="4"></textarea><span class="admin-field-hint">One course per line.</span></div>
+                <div><label for="corporate-tgfvp-duration">Programme duration</label><input id="corporate-tgfvp-duration" data-cms-field="tgfvp.duration" maxlength="1500"></div>
+                <div><label for="corporate-tgfvp-cycle">Academic cycle</label><textarea id="corporate-tgfvp-cycle" data-cms-field="tgfvp.cycle" maxlength="1500" rows="2"></textarea></div>
+                <div><label for="corporate-tgfvp-completion">Programme completion</label><textarea id="corporate-tgfvp-completion" data-cms-field="tgfvp.completion" maxlength="1500" rows="2"></textarea></div>
+                <div><label for="corporate-tgfvp-graduation">Graduation schedule</label><textarea id="corporate-tgfvp-graduation" data-cms-field="tgfvp.graduation" maxlength="1500" rows="2"></textarea></div>
+                <div><label for="corporate-tgfvp-locations">Training locations</label><textarea id="corporate-tgfvp-locations" data-cms-field="tgfvp.locations" maxlength="1500" rows="2"></textarea></div>
+                <div><label for="corporate-tgfvp-schedule">Class schedule</label><textarea id="corporate-tgfvp-schedule" data-cms-field="tgfvp.schedule" maxlength="1500" rows="2"></textarea></div>
+                <div><label for="corporate-tgfvp-certification">Certification</label><textarea id="corporate-tgfvp-certification" data-cms-field="tgfvp.certification" maxlength="1500" rows="2"></textarea></div>
+                <div><label for="corporate-tgfvp-benefits">Programme benefits</label><textarea id="corporate-tgfvp-benefits" data-cms-text-list="tgfvp.benefits" rows="6"></textarea><span class="admin-field-hint">One benefit per line.</span></div>
+                <div><label for="corporate-tgfvp-phone">TGFVP admissions phone</label><input id="corporate-tgfvp-phone" data-cms-field="tgfvp.admissionsPhone" maxlength="1500"></div>
+              </div>
+            </details>
+            <details class="corporate-content-group">
+              <summary>News and media</summary>
+              <div class="corporate-content-fields">
+                <div><label for="corporate-newsroom-intro">Newsroom introduction</label><textarea id="corporate-newsroom-intro" data-cms-field="newsroom.intro" maxlength="1000" rows="2"></textarea></div>
+              </div>
+              <div data-cms-list="newsroom.items"></div>
+              <button class="small-action" data-cms-add="newsroom.items" type="button">Add a news or media item</button>
+            </details>
+            <details class="corporate-content-group">
+              <summary>Careers and vacancies</summary>
+              <div class="corporate-content-fields">
+                <div><label for="corporate-careers-intro">Careers introduction</label><textarea id="corporate-careers-intro" data-cms-field="careers.intro" maxlength="1000" rows="3"></textarea></div>
+                <div><label for="corporate-careers-general-title">General application heading</label><input id="corporate-careers-general-title" data-cms-field="careers.generalTitle" maxlength="120"></div>
+                <div><label for="corporate-careers-general-description">General application details</label><textarea id="corporate-careers-general-description" data-cms-field="careers.generalDescription" maxlength="1000" rows="3"></textarea></div>
+              </div>
+              <div data-cms-list="careers.vacancies"></div>
+              <button class="small-action" data-cms-add="careers.vacancies" type="button">Add a vacancy</button>
+            </details>
+            <details class="corporate-content-group">
+              <summary>Community</summary>
+              <div class="corporate-content-fields">
+                <div><label for="corporate-community-intro">Community introduction</label><textarea id="corporate-community-intro" data-cms-field="community.intro" maxlength="1000" rows="3"></textarea></div>
+                <div><label for="corporate-community-points">Updates and ways to participate</label><textarea id="corporate-community-points" data-cms-text-list="community.points" rows="4"></textarea><span class="admin-field-hint">One item per line.</span></div>
+              </div>
+            </details>
+            <details class="corporate-content-group">
+              <summary>Contact details</summary>
+              <p class="admin-field-hint">Only publish confirmed addresses, phone numbers, emails and social profiles.</p>
+              <div class="corporate-content-fields">
+                <div><label for="corporate-office-name">Head office name</label><input id="corporate-office-name" data-cms-field="contact.headOffice.name" maxlength="160"></div>
+                <div><label for="corporate-office-address">Head office address</label><textarea id="corporate-office-address" data-cms-field="contact.headOffice.address" maxlength="500" rows="2"></textarea></div>
+                <div><label for="corporate-office-phone">Corporate phone</label><input id="corporate-office-phone" data-cms-field="contact.headOffice.phone" maxlength="40"></div>
+                <div><label for="corporate-office-email">Corporate email</label><input id="corporate-office-email" data-cms-field="contact.headOffice.email" maxlength="254" type="email"></div>
+              </div>
+              <h3>Branches and locations</h3>
+              <div data-cms-list="contact.branches"></div>
+              <button class="small-action" data-cms-add="contact.branches" type="button">Add a location</button>
+              <h3>Social media links</h3>
+              <div data-cms-list="contact.socials"></div>
+              <button class="small-action" data-cms-add="contact.socials" type="button">Add a social link</button>
+            </details>
+            <p class="admin-message" id="corporate-content-status" role="status" aria-live="polite"></p>
+            <button class="button button-orange" id="save-corporate-content" type="submit">Publish corporate content <span aria-hidden="true">↗</span></button>
+          </form>
+        </section>
+        <section class="admin-panel enrollment-panel" id="admin-public-submissions" data-admin-view-panel="public-submissions" aria-labelledby="public-submissions-heading" hidden>
+          <div class="admin-panel-heading">
+            <div>
+              <p class="micro-label">Corporate website inbox</p>
+              <h2 id="public-submissions-heading">Website submissions <span id="public-submissions-count"></span></h2>
+            </div>
+            <button class="small-action" id="refresh-public-submissions" type="button">Refresh inbox</button>
+          </div>
+          <p class="admin-intro">Career applications, community registrations and contact enquiries are available to authorized administrators only. Newsletter preferences can be reviewed here; automated newsletters and email receipts are not configured.</p>
+          <div class="public-submissions-toolbar">
+            <label for="public-submissions-filter">Show</label>
+            <select id="public-submissions-filter">
+              <option value="all">All submission types</option>
+              <option value="career">Career applications</option>
+              <option value="community">Community registrations</option>
+              <option value="contact">Contact enquiries</option>
+            </select>
+            <button class="small-action" id="public-submissions-previous" type="button" disabled>Previous</button>
+            <span id="public-submissions-page" aria-live="polite">0–0 of 0</span>
+            <button class="small-action" id="public-submissions-next" type="button" disabled>Next</button>
+          </div>
+          <p class="admin-message" id="public-submissions-message" role="status" aria-live="polite"></p>
+          <div class="admin-user-list" id="public-submission-list" aria-live="polite"></div>
+        </section>
+        <section class="admin-panel enrollment-panel message-center" data-message-center="admin" data-admin-view-panel="messages" aria-labelledby="admin-messages-heading" hidden>
+          <div class="admin-panel-heading">
+            <div><p class="micro-label">Private support conversations</p><h2 id="admin-messages-heading">Messages</h2></div>
+            <button class="small-action" type="button" data-message-refresh>Refresh inbox</button>
+          </div>
+          <p class="admin-intro">Send a private message and attachments to students, teachers, and other active team members.</p>
+          <div class="message-center-layout">
+            <aside class="message-recipient-pane" aria-label="Message recipients">
+              <label for="admin-message-search">Search active accounts</label>
+              <input id="admin-message-search" type="search" autocomplete="off" placeholder="Name, email or role">
+              <div class="message-recipient-list" data-message-recipients aria-live="polite"></div>
+            </aside>
+            <section class="message-thread-pane" aria-label="Conversation">
+              <header class="message-thread-heading" data-message-thread-heading>
+                <h3 data-message-recipient-title>Select an account</h3>
+                <p data-message-recipient-subtitle></p>
+              </header>
+              <div class="message-thread" data-message-thread aria-live="polite"></div>
+              <form class="admin-form message-composer" data-message-form>
+                <label for="admin-message-body">Message</label>
+                <textarea id="admin-message-body" data-message-body maxlength="2000" rows="3" placeholder="Write an optional message or describe your attachments"></textarea>
+                <label class="message-file-picker" for="admin-message-files">Attach files</label>
+                <input id="admin-message-files" data-message-files type="file" accept=".pdf,.doc,.docx,.jpg,.jpeg,.png,.webp,.mp4,.mov,.webm,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,image/jpeg,image/png,image/webp,video/mp4,video/quicktime,video/webm" multiple>
+                <p class="admin-field-hint message-limits" data-message-limits></p>
+                <div class="message-attachment-previews" data-message-previews aria-live="polite"></div>
+                <progress class="message-upload-progress" data-message-progress max="100" value="0" hidden></progress>
+                <p class="admin-message" data-message-status role="status" aria-live="polite"></p>
+                <button class="button button-orange" type="submit" data-message-send disabled>Send message <span aria-hidden="true">↗</span></button>
+              </form>
+            </section>
+          </div>
+        </section>
+          </div>
+        </div>
       </section>
+      <dialog class="admin-dialog" id="reject-account-dialog" aria-labelledby="reject-account-title">
+        <form class="admin-form" id="reject-account-form">
+          <h2 id="reject-account-title">Reject student registration</h2>
+          <p class="admin-intro">The student will see this reason when they sign in.</p>
+          <label for="reject-account-reason">Reason for rejection</label>
+          <textarea id="reject-account-reason" minlength="5" maxlength="500" rows="4" required></textarea>
+          <p class="admin-message" id="reject-account-message" role="alert" aria-live="polite"></p>
+          <div class="admin-form-actions">
+            <button class="button button-quiet" id="cancel-reject-account" type="button">Cancel</button>
+            <button class="button button-orange" id="confirm-reject-account" type="submit">Reject registration</button>
+          </div>
+        </form>
+      </dialog>
+      <dialog class="admin-dialog" id="rejection-reason-dialog" aria-labelledby="rejection-reason-title">
+        <form class="admin-form" id="rejection-reason-form">
+          <h2 id="rejection-reason-title">Reject submission</h2>
+          <p class="admin-intro">Choose a suggested reason and edit it, or enter a custom explanation.</p>
+          <label for="rejection-reason-template">Suggested reason</label>
+          <select id="rejection-reason-template">
+            <option value="">Choose a reason or enter a custom one</option>
+            <option>Payment receipt is unclear.</option>
+            <option>Incorrect payment amount.</option>
+            <option>Payment could not be verified.</option>
+            <option>Receipt does not match the selected programme.</option>
+            <option>Duplicate payment submission.</option>
+            <option>Invalid payment evidence.</option>
+            <option>Additional verification required.</option>
+            <option value="custom">Custom reason</option>
+          </select>
+          <label for="rejection-reason-text">Reason</label>
+          <textarea id="rejection-reason-text" minlength="5" maxlength="500" rows="4" required></textarea>
+          <p class="admin-message" id="rejection-reason-message" role="alert" aria-live="polite"></p>
+          <div class="admin-form-actions">
+            <button class="button button-quiet" id="cancel-rejection-reason" type="button">Cancel</button>
+            <button class="button button-orange" type="submit">Submit rejection</button>
+          </div>
+        </form>
+      </dialog>
+      <dialog class="admin-dialog" id="timetable-editor-dialog" aria-labelledby="timetable-editor-heading">
+        <form class="admin-form" id="timetable-editor-form">
+          <p class="eyebrow"><span></span> Schedule details</p>
+          <h2 id="timetable-editor-heading">Edit timetable</h2>
+          <input id="timetable-editor-id" type="hidden">
+          <label for="timetable-editor-module">Course module</label>
+          <select id="timetable-editor-module" required></select>
+          <label for="timetable-editor-title">Class title</label>
+          <input id="timetable-editor-title" maxlength="160" required>
+          <label for="timetable-editor-start">Start time</label>
+          <input id="timetable-editor-start" type="datetime-local" required>
+          <label for="timetable-editor-mode">Delivery method</label>
+          <select id="timetable-editor-mode">
+            <option value="online">Online</option>
+            <option value="location">TGFVP training location</option>
+            <option value="venue">Other venue</option>
+          </select>
+          <div data-timetable-editor-field="online">
+            <label for="timetable-editor-url">Meeting link</label>
+            <input id="timetable-editor-url" type="url" placeholder="https://...">
+          </div>
+          <div data-timetable-editor-field="location" hidden>
+            <label for="timetable-editor-location">Training location</label>
+            <select id="timetable-editor-location"></select>
+          </div>
+          <div data-timetable-editor-field="venue" hidden>
+            <label for="timetable-editor-venue">Venue details</label>
+            <input id="timetable-editor-venue" maxlength="250">
+          </div>
+          <p class="admin-message" id="timetable-editor-message" role="alert" aria-live="polite"></p>
+          <div class="dialog-actions">
+            <button class="button button-quiet" id="cancel-timetable-edit" type="button">Cancel</button>
+            <button class="button button-orange" type="submit">Save timetable</button>
+          </div>
+        </form>
+      </dialog>
+      <dialog class="admin-dialog" id="admin-weekly-timetable-editor-dialog" aria-labelledby="admin-weekly-timetable-editor-heading">
+        <form class="admin-form" id="admin-weekly-timetable-editor-form">
+          <p class="eyebrow"><span></span> Recurring course schedule</p>
+          <h2 id="admin-weekly-timetable-editor-heading">Edit weekly timetable</h2>
+          <input id="admin-weekly-timetable-editor-id" type="hidden">
+          <label for="admin-weekly-timetable-timezone">Time zone</label>
+          <input id="admin-weekly-timetable-timezone" type="text" maxlength="80" required>
+          <p class="admin-field-hint">Use an IANA time zone, for example Africa/Douala.</p>
+          <div class="collaboration-weekday-editor" data-collab-weekday-editor></div>
+          <p class="admin-message" id="admin-weekly-timetable-editor-message" role="alert" aria-live="polite"></p>
+          <div class="dialog-actions">
+            <button class="button button-quiet" id="cancel-admin-weekly-timetable-edit" type="button">Cancel</button>
+            <button class="button button-orange" type="submit">Save timetable</button>
+          </div>
+        </form>
+      </dialog>
+      <dialog class="admin-dialog" id="account-password-dialog" aria-labelledby="account-password-heading">
+        <form class="admin-form" id="account-password-form">
+          <h2 id="account-password-heading">Set new password</h2>
+          <p class="admin-intro">Use at least 14 characters. This password takes effect immediately.</p>
+          <label for="account-new-password">New password</label>
+          <input id="account-new-password" name="password" type="password" minlength="14" maxlength="1024" autocomplete="new-password" required>
+          <label for="account-confirm-password">Confirm new password</label>
+          <input id="account-confirm-password" name="confirmPassword" type="password" minlength="14" maxlength="1024" autocomplete="new-password" required>
+          <p class="admin-message" id="account-password-message" role="alert" aria-live="polite"></p>
+          <div class="dialog-actions">
+            <button class="button button-quiet" id="cancel-account-password" type="button">Cancel</button>
+            <button class="button button-orange" id="save-account-password" type="submit">Save password</button>
+          </div>
+        </form>
+      </dialog>
     </main>
 
     <footer class="site-footer admin-footer">

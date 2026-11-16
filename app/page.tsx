@@ -1,20 +1,17 @@
-import { readFile } from "node:fs/promises";
-import path from "node:path";
 import Script from "next/script";
+
+import { loadPageBody } from "./lib/static-page";
 
 export const dynamic = "force-dynamic";
 
 export default async function HomePage() {
-  const document = await readFile(path.join(process.cwd(), "index.html"), "utf8");
-  const body = document.match(/<body\b[^>]*>([\s\S]*?)<\/body>/i)?.[1];
-  if (!body) {
-    throw new Error("Could not load the TGFVP homepage HTML.");
-  }
+  const body = await loadPageBody("corporate.html", "TGF Group corporate homepage HTML");
 
   return (
     <>
       <div dangerouslySetInnerHTML={{ __html: body }} />
       <Script src="/app.js" strategy="afterInteractive" />
+      <Script src="/corporate.js" strategy="afterInteractive" />
     </>
   );
 }

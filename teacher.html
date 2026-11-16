@@ -24,7 +24,27 @@
           <span class="brand-caption">Teacher<br>Studio</span>
         </a>
         <a class="text-link admin-public-link" href="/">Public website <span aria-hidden="true">↗</span></a>
-        <button class="button button-dark admin-sign-out" id="classroom-sign-out" type="button" hidden>Sign out</button>
+        <div class="admin-header-actions">
+          <button
+            class="admin-theme-toggle"
+            id="dashboard-theme-toggle"
+            type="button"
+            aria-label="Switch to dark mode"
+            aria-pressed="false"
+            title="Switch to dark mode"
+            hidden
+          >
+            <svg class="icon-moon" viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M20.2 15.4A8.5 8.5 0 0 1 8.6 3.8 8.6 8.6 0 1 0 20.2 15.4Z"></path>
+            </svg>
+            <svg class="icon-sun" viewBox="0 0 24 24" aria-hidden="true">
+              <circle cx="12" cy="12" r="4"></circle>
+              <path d="M12 2v2m0 16v2M4.93 4.93l1.42 1.42m11.3 11.3 1.42 1.42M2 12h2m16 0h2M4.93 19.07l1.42-1.42m11.3-11.3 1.42-1.42"></path>
+            </svg>
+          </button>
+          <span class="sr-only" data-user-theme-status role="status" aria-live="polite"></span>
+          <button class="button button-dark admin-sign-out" id="classroom-sign-out" type="button" hidden>Sign out</button>
+        </div>
       </div>
     </header>
     <main class="admin-main container classroom-main" id="teacher-main">
@@ -43,30 +63,305 @@
       </section>
 
       <section id="teacher-dashboard" hidden>
-        <div class="classroom-heading">
-          <div><p class="eyebrow"><span></span> Teacher studio</p><h1>Teach with<br><em>purpose.</em></h1><p class="admin-intro">Welcome, <strong id="teacher-display-name"></strong>. Manage your teaching materials and live lessons.</p></div>
-          <a class="button button-dark" href="/admin" id="teacher-admin-link" hidden>Manage courses <span aria-hidden="true">↗</span></a>
+        <div class="student-dashboard-shell">
+          <aside class="student-sidebar" aria-label="Teacher dashboard navigation">
+            <p class="micro-label">Teacher studio</p>
+            <nav>
+              <a href="#teacher-overview" aria-current="location">
+                <svg class="student-nav-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m3 10 9-7 9 7v10H5V9.5M9 20v-6h6v6" /></svg>
+                <span>Overview</span>
+              </a>
+              <a href="#teacher-classes">
+                <svg class="student-nav-icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2" /><path d="m10 9 5 3-5 3z" /></svg>
+                <span>Live classes</span>
+              </a>
+              <a href="#teacher-weekly-timetable">
+                <svg class="student-nav-icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="17" rx="2" /><path d="M8 2v4m8-4v4M3 9h18m-13 4h3m-3 4h6" /></svg>
+                <span>Timetable</span>
+              </a>
+              <a href="#teacher-recordings">
+                <svg class="student-nav-icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2" /><path d="m10 9 5 3-5 3z" /></svg>
+                <span>My Live Classes</span>
+              </a>
+              <a href="#teacher-modules">
+                <svg class="student-nav-icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="4" width="14" height="16" rx="2" /><path d="M9 4v16m3-11h4m-4 4h4" /></svg>
+                <span>Teaching materials</span>
+              </a>
+              <a href="#teacher-course-content">
+                <svg class="student-nav-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4h14v16H5zM8 8h8M8 12h8M8 16h5" /></svg>
+                <span>Course content</span>
+              </a>
+              <a href="#teacher-capstones">
+                <svg class="student-nav-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m4 12 5 5L20 6" /></svg>
+                <span>Capstone reviews</span>
+              </a>
+              <a href="#teacher-daily-answers">
+                <svg class="student-nav-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4h14v16H5zM8 8h8M8 12h8M8 16h5" /></svg>
+                <span>Daily answer reviews</span>
+              </a>
+              <a href="#teacher-profile">
+                <svg class="student-nav-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="3" /><path d="M5 20a7 7 0 0 1 14 0" /></svg>
+                <span>Tutor profile</span>
+              </a>
+              <a href="#teacher-peer-messages">
+                <svg class="student-nav-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11.5a7.5 7.5 0 0 1-7.5 7.5 8 8 0 0 1-3.5-.8L4 20l1.5-4A7.5 7.5 0 1 1 20 11.5Z" /><path d="M8 11h8m-8 3h5" /></svg>
+                <span>Messages</span>
+              </a>
+            </nav>
+          </aside>
+
+          <div class="student-dashboard-content">
+            <header class="classroom-heading student-welcome teacher-welcome" id="teacher-overview" data-teacher-dashboard-view="teacher-overview">
+              <div>
+                <p class="eyebrow"><span></span> TGFVP teacher studio</p>
+                <h1>Welcome back,<br><em id="teacher-display-name"></em></h1>
+                <p class="admin-intro">Your classes, course materials and tutor profile, all in one place.</p>
+              </div>
+              <div class="teacher-welcome-actions">
+                <a class="button button-orange" href="#teacher-classes">Schedule a class <span aria-hidden="true">↗</span></a>
+                <a class="button button-dark" href="/admin" id="teacher-admin-link" hidden>Manage courses <span aria-hidden="true">↗</span></a>
+              </div>
+            </header>
+
+            <section class="student-quick-access" aria-label="Teacher quick access" data-teacher-dashboard-view="teacher-overview">
+              <a class="student-quick-card" href="#teacher-recordings">
+                <svg class="student-quick-icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2" /><path d="m10 9 5 3-5 3z" /></svg>
+                <span class="student-quick-copy"><strong>Go live</strong><small>Start a class or open recordings</small></span>
+                <span class="student-quick-arrow" aria-hidden="true">↗</span>
+              </a>
+              <a class="student-quick-card" href="#teacher-modules">
+                <svg class="student-quick-icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="4" width="14" height="16" rx="2" /><path d="M9 4v16m3-11h4m-4 4h4" /></svg>
+                <span class="student-quick-copy"><strong>Teaching materials</strong><small>Open modules and submit resources</small></span>
+                <span class="student-quick-arrow" aria-hidden="true">↗</span>
+              </a>
+              <a class="student-quick-card" href="#teacher-profile">
+                <svg class="student-quick-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="3" /><path d="M5 20a7 7 0 0 1 14 0" /></svg>
+                <span class="student-quick-copy"><strong>Tutor profile</strong><small>Manage your learner-facing details</small></span>
+                <span class="student-quick-arrow" aria-hidden="true">↗</span>
+              </a>
+            </section>
+
+            <section class="student-progress-overview" aria-labelledby="teacher-summary-title" data-teacher-dashboard-view="teacher-overview">
+              <h2 id="teacher-summary-title">Teaching overview</h2>
+              <div class="student-dashboard-summary" aria-label="Teaching overview counts">
+                <div class="student-stat"><span>Upcoming live classes</span><strong id="teacher-class-count">—</strong></div>
+                <div class="student-stat"><span>Programme modules</span><strong id="teacher-module-count">—</strong></div>
+                <div class="student-stat"><span>Materials submitted</span><strong id="teacher-material-count">—</strong></div>
+              </div>
+              <div class="collaboration-schedule-list" data-collab-live-overview aria-live="polite"></div>
+            </section>
+
+            <section class="student-dashboard-section" id="teacher-classes" data-teacher-dashboard-view="teacher-classes" aria-labelledby="teacher-classes-title">
+              <div class="student-dashboard-section-heading">
+                <div><p class="micro-label">Class schedule</p><h2 id="teacher-classes-title">Upcoming live classes</h2></div>
+                <span class="student-section-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2" /><path d="m10 9 5 3-5 3z" /></svg></span>
+              </div>
+              <p class="admin-message" id="teacher-class-message" role="status" aria-live="polite"></p>
+              <div class="live-class-list" id="teacher-class-list"></div>
+              <form class="admin-form teacher-class-form" id="teacher-class-form">
+                <h3 id="teacher-class-form-heading">Schedule a live class</h3>
+                <input id="teacher-class-edit-id" type="hidden">
+                <div class="admin-form-grid">
+                  <div><label for="live-module">Course module</label><select id="live-module" required></select></div>
+                  <div><label for="live-class-title">Class title</label><input id="live-class-title" maxlength="160" required></div>
+                  <div><label for="live-start-time">Start time</label><input id="live-start-time" type="datetime-local" required></div>
+                  <div>
+                    <label for="live-delivery-mode">Delivery method</label>
+                    <select id="live-delivery-mode">
+                      <option value="online">Online</option>
+                      <option value="location">TGFVP training location</option>
+                      <option value="venue">Other venue</option>
+                    </select>
+                  </div>
+                  <div data-teacher-class-field="online"><label for="live-meeting-url">Meeting link</label><input id="live-meeting-url" type="url" placeholder="https://..."></div>
+                  <div data-teacher-class-field="location" hidden><label for="live-location">Training location</label><select id="live-location"></select></div>
+                  <div data-teacher-class-field="venue" hidden><label for="live-venue">Venue details</label><input id="live-venue" maxlength="250"></div>
+                </div>
+                <p class="admin-field-hint">New and resubmitted classes remain private until approved. Learner module-access rules also apply.</p>
+                <p class="admin-message" id="teacher-class-edit-message" role="status" aria-live="polite"></p>
+                <button class="button button-orange" type="submit">Schedule class <span aria-hidden="true">↗</span></button>
+                <button class="button button-quiet" id="cancel-teacher-class-edit" type="button" hidden>Cancel edit</button>
+              </form>
+            </section>
+
+            <section class="student-dashboard-section" id="teacher-weekly-timetable" data-teacher-dashboard-view="teacher-weekly-timetable" data-collab-tutor-timetable aria-labelledby="teacher-weekly-timetable-title">
+              <div class="student-dashboard-section-heading">
+                <div><p class="micro-label">Weekly availability</p><h2 id="teacher-weekly-timetable-title">Teaching timetable</h2></div>
+                <button class="small-action" type="button" data-collab-refresh="timetable">Refresh</button>
+              </div>
+              <p class="admin-intro">Submit your weekly teaching hours, Monday through Sunday, for approval. Students see a schedule only after it has been approved.</p>
+              <form class="admin-form teacher-class-form" data-collab-timetable-form>
+                <label for="collab-timetable-course">Course</label>
+                <select id="collab-timetable-course" data-collab-course required></select>
+                <div class="collaboration-weekday-editor" data-collab-weekday-editor></div>
+                <p class="admin-message" data-collab-timetable-status role="status" aria-live="polite"></p>
+                <button class="button button-orange" type="submit">Submit timetable for approval</button>
+              </form>
+              <div class="collaboration-schedule-list" data-collab-timetable aria-live="polite"></div>
+              <h3>Upcoming classes</h3>
+              <div class="collaboration-schedule-list" data-collab-teacher-classes aria-live="polite"></div>
+            </section>
+
+            <section class="student-dashboard-section" id="teacher-recordings" data-teacher-dashboard-view="teacher-recordings" data-collab-tutor-recordings aria-labelledby="teacher-recordings-title">
+              <div class="student-dashboard-section-heading">
+                <div><p class="micro-label">Class library</p><h2 id="teacher-recordings-title">My Live Classes</h2></div>
+                <button class="small-action" type="button" data-collab-refresh="recordings">Refresh</button>
+              </div>
+              <p class="admin-intro">Recordings of classes you have taught will appear here when processing is complete.</p>
+              <h3>Upcoming classes</h3>
+              <div class="collaboration-schedule-list" data-collab-live-classes aria-live="polite"></div>
+              <form class="admin-form teacher-class-form teacher-go-live-form" data-collab-go-live>
+                <h3>Go live now</h3>
+                <p class="admin-intro">Choose one of your assigned courses. Approved enrolled students will receive an invitation, and recording starts automatically when you enter the room.</p>
+                <label for="teacher-go-live-course">Course</label>
+                <select id="teacher-go-live-course" data-go-live-course required></select>
+                <p class="admin-message" data-go-live-status role="status" aria-live="polite"></p>
+                <button class="button button-orange" data-go-live-submit type="submit">Start live class</button>
+              </form>
+              <h3>Recordings</h3>
+              <div class="collaboration-recording-list" data-collab-recordings aria-live="polite"></div>
+            </section>
+
+            <section class="student-dashboard-section" id="teacher-peer-messages" data-teacher-dashboard-view="teacher-peer-messages" data-collaboration-root data-collaboration-role="teacher" aria-labelledby="teacher-peer-messages-title">
+              <div class="student-dashboard-section-heading">
+                <div><p class="micro-label">Course conversations</p><h2 id="teacher-peer-messages-title">Messages</h2></div>
+                <button class="small-action" type="button" data-collab-refresh="contacts">Refresh</button>
+              </div>
+              <p class="admin-intro">Message students enrolled in your courses or contact the administrator through the support inbox.</p>
+              <div class="collaboration-chat-layout">
+                <aside class="collaboration-contact-panel" aria-label="People you can message">
+                  <label for="teacher-chat-search">Find a person</label>
+                  <input id="teacher-chat-search" type="search" data-collab-search placeholder="Search students or courses">
+                  <div class="collaboration-contact-list" data-collab-contacts aria-live="polite"></div>
+                </aside>
+                <section class="collaboration-chat-panel" aria-label="Conversation">
+                  <div class="collaboration-chat-heading" data-collab-chat-heading><strong>Select someone to start a conversation</strong></div>
+                  <div class="collaboration-chat-thread" data-collab-thread aria-live="polite"></div>
+                  <form class="collaboration-chat-composer" data-collab-form>
+                    <label class="sr-only" for="teacher-chat-body">Message</label>
+                    <textarea id="teacher-chat-body" data-collab-body maxlength="2000" rows="3" placeholder="Write a message" disabled></textarea>
+                    <div class="collaboration-composer-actions">
+                      <label class="small-action" for="teacher-chat-files">Attach files</label>
+                      <input id="teacher-chat-files" data-collab-files type="file" accept=".pdf,.doc,.docx,.jpg,.jpeg,.png,.webp,.mp4,.mov,.webm,.mp3,.wav,.m4a,.ogg" multiple disabled>
+                      <button class="small-action" type="button" data-collab-record disabled>Record voice note</button>
+                      <button class="button button-orange" type="submit" data-collab-send disabled>Send</button>
+                    </div>
+                    <p class="admin-field-hint">Up to five files · 25 MB per file. Voice notes are recorded in your browser.</p>
+                    <div class="collaboration-file-list" data-collab-file-list></div>
+                    <p class="admin-message" data-collab-status role="status" aria-live="polite"></p>
+                  </form>
+                </section>
+              </div>
+              <button class="small-action collaboration-admin-contact" type="button" data-collab-admin-contact>Message the administrator</button>
+              <section class="admin-panel enrollment-panel message-center user-message-center" id="teacher-messages" data-message-center="user" aria-labelledby="teacher-messages-heading" hidden>
+                <div class="admin-panel-heading"><div><p class="micro-label">Private support conversation</p><h2 id="teacher-messages-heading">Messages with the administrator</h2></div><button class="small-action" type="button" data-message-refresh>Refresh messages</button></div>
+                <p class="admin-intro">Send a private message to the administrator. You can attach up to five supported files to one message.</p>
+                <div class="message-thread" data-message-thread aria-live="polite"></div>
+                <form class="admin-form message-composer" data-message-form>
+                  <label for="teacher-message-body">Message</label>
+                  <textarea id="teacher-message-body" data-message-body maxlength="2000" rows="3" placeholder="Write an optional message or describe your attachments"></textarea>
+                  <label class="message-file-picker" for="teacher-message-files">Attach files</label>
+                  <input id="teacher-message-files" data-message-files type="file" accept=".pdf,.doc,.docx,.jpg,.jpeg,.png,.webp,.mp4,.mov,.webm,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,image/jpeg,image/png,image/webp,video/mp4,video/quicktime,video/webm" multiple>
+                  <p class="admin-field-hint message-limits" data-message-limits></p>
+                  <div class="message-attachment-previews" data-message-previews aria-live="polite"></div>
+                  <progress class="message-upload-progress" data-message-progress max="100" value="0" hidden></progress>
+                  <p class="admin-message" data-message-status role="status" aria-live="polite"></p>
+                  <button class="button button-orange" type="submit" data-message-send disabled>Send message <span aria-hidden="true">↗</span></button>
+                </form>
+              </section>
+            </section>
+
+            <section class="student-dashboard-section" id="teacher-modules" data-teacher-dashboard-view="teacher-modules" aria-labelledby="teacher-modules-title">
+              <div class="student-dashboard-section-heading">
+                <div><p class="micro-label">Teaching materials</p><h2 id="teacher-modules-title">Your programme modules</h2></div>
+                <span class="student-section-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><rect x="5" y="4" width="14" height="16" rx="2" /><path d="M9 4v16m3-11h4m-4 4h4" /></svg></span>
+              </div>
+              <div class="teacher-module-list" id="teacher-module-list"></div>
+              <form class="admin-form teacher-class-form" id="teacher-material-form">
+                <h3>Submit a learning material</h3>
+                <div class="admin-form-grid">
+                  <div><span class="micro-label">Course</span><p class="admin-location-subtitle" id="material-assigned-course">Loading assigned course…</p></div>
+                  <div><label for="material-title">Material title</label><input id="material-title" maxlength="120" required></div>
+                </div>
+                <label for="material-description">Description</label>
+                <textarea id="material-description" maxlength="1000" rows="2"></textarea>
+                <label for="material-file">Document, image or video</label>
+                <input id="material-file" type="file" accept=".pdf,.jpg,.jpeg,.png,.webp,.gif,.doc,.docx,.mp4,.mov,.webm" required>
+                <p class="admin-field-hint">PDF, JPG, PNG, WebP, GIF, DOC, DOCX, MP4, MOV or WebM · up to 10 MB. Files are stored securely in Cloudinary. Your assigned course is selected automatically; an administrator assigns approved resources to a module and weekly block.</p>
+                <p class="admin-message" id="teacher-material-message" role="status" aria-live="polite"></p>
+                <button class="button button-orange" type="submit">Submit for review <span aria-hidden="true">↗</span></button>
+              </form>
+              <div class="teacher-module-list" id="teacher-material-list" aria-live="polite"></div>
+            </section>
+
+            <section class="student-dashboard-section" id="teacher-course-content" data-teacher-dashboard-view="teacher-course-content" aria-labelledby="teacher-course-content-title">
+              <div class="student-dashboard-section-heading">
+                <div><p class="micro-label">Curriculum workflow</p><h2 id="teacher-course-content-title">Submit course content</h2></div>
+                <span class="student-section-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M5 4h14v16H5zM8 8h8M8 12h8M8 16h5" /></svg></span>
+              </div>
+              <p class="admin-intro">Upload the course document for an assigned programme. After administrator review and approval, the platform creates the course modules and their four weekly blocks for the teacher and enrolled learners.</p>
+              <form class="admin-form teacher-class-form" id="teacher-course-submission-form">
+                <div class="admin-form-grid">
+                  <div><label for="course-submission-title">Course document title</label><input id="course-submission-title" name="title" maxlength="120" required></div>
+                </div>
+                <label for="course-submission-file">Course document</label>
+                <input id="course-submission-file" name="file" type="file" accept=".pdf,.doc,.docx,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document" required>
+                <p class="admin-field-hint">PDF, DOC or DOCX · up to 10 MB. Your assigned course is selected automatically. Modules and weekly blocks appear after administrator approval.</p>
+                <p class="admin-message" id="teacher-course-submission-message" role="status" aria-live="polite"></p>
+                <button class="button button-orange" type="submit">Submit course document <span aria-hidden="true">↗</span></button>
+              </form>
+              <div class="teacher-module-list" id="teacher-course-submission-list" aria-live="polite"></div>
+            </section>
+
+            <section class="student-dashboard-section" id="teacher-capstones" data-teacher-dashboard-view="teacher-capstones" aria-labelledby="teacher-capstones-title">
+              <div class="student-dashboard-section-heading">
+                <div><p class="micro-label">Learner progression</p><h2 id="teacher-capstones-title">Capstone reviews</h2></div>
+                <span class="student-section-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="m4 12 5 5L20 6" /></svg></span>
+              </div>
+              <p class="admin-intro">Approve a learner's capstone to complete the module and release the next module. If changes are needed, explain them so the learner can revise and resubmit.</p>
+              <p class="admin-message" id="teacher-capstone-message" role="status" aria-live="polite"></p>
+              <div class="teacher-module-list" id="teacher-capstone-list" aria-live="polite"></div>
+            </section>
+
+            <section class="student-dashboard-section" id="teacher-daily-answers" data-teacher-dashboard-view="teacher-daily-answers" aria-labelledby="teacher-daily-answers-title">
+              <div class="student-dashboard-section-heading">
+                <div><p class="micro-label">Learner progress</p><h2 id="teacher-daily-answers-title">Daily answer reviews</h2></div>
+                <span class="student-section-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M5 4h14v16H5zM8 8h8M8 12h8M8 16h5" /></svg></span>
+              </div>
+              <p class="admin-intro">Review learner responses to each day's questions and activities. Request changes with feedback or approve an answer; daily approval does not unlock the next module.</p>
+              <p class="admin-message" id="teacher-daily-answer-message" role="status" aria-live="polite"></p>
+              <div class="teacher-module-list" id="teacher-daily-answer-list" aria-live="polite"></div>
+            </section>
+
+            <section class="student-dashboard-section" id="teacher-profile" data-teacher-dashboard-view="teacher-profile" aria-labelledby="teacher-profile-heading">
+              <div class="student-dashboard-section-heading">
+                <div><p class="micro-label">Learner-facing information</p><h2 id="teacher-profile-heading">Your tutor profile</h2></div>
+                <span class="student-section-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="3" /><path d="M5 20a7 7 0 0 1 14 0" /></svg></span>
+              </div>
+              <p class="admin-intro">Submit your professional details for administrator review. Your profile is shown to learners only after an administrator publishes it.</p>
+              <div class="teacher-profile-photo-editor">
+                <img id="teacher-profile-photo-preview" class="teacher-profile-photo-preview" alt="Your profile photo" hidden>
+                <div>
+                  <label for="teacher-profile-photo">Profile picture</label>
+                  <input id="teacher-profile-photo" type="file" accept="image/jpeg,image/png,image/webp">
+                  <p class="admin-field-hint">JPG, PNG or WebP · max 5 MB</p>
+                </div>
+              </div>
+              <input id="teacher-profile-photo-url" type="hidden">
+              <p class="admin-message" id="teacher-profile-status" role="status" aria-live="polite"></p>
+              <form class="admin-form teacher-class-form" id="teacher-profile-form">
+                <label for="teacher-profile-title">Professional title</label>
+                <input id="teacher-profile-title" maxlength="120" placeholder="For example, Electrical Installation Tutor">
+                <label for="teacher-profile-biography">Biography</label>
+                <textarea id="teacher-profile-biography" maxlength="2000" rows="4"></textarea>
+                <label for="teacher-profile-qualifications">Qualifications and experience</label>
+                <textarea id="teacher-profile-qualifications" maxlength="1200" rows="3"></textarea>
+                <p class="admin-message" id="teacher-profile-message" role="status" aria-live="polite"></p>
+                <button class="button button-orange" type="submit">Save profile <span aria-hidden="true">↗</span></button>
+              </form>
+            </section>
+          </div>
         </div>
-        <section class="admin-panel teacher-schedule-panel" aria-labelledby="teacher-classes-title">
-          <div class="admin-panel-heading"><div><p class="micro-label">Class schedule</p><h2 id="teacher-classes-title">Upcoming live classes</h2></div></div>
-          <p class="admin-message" id="teacher-class-message" role="status" aria-live="polite"></p>
-          <div class="live-class-list" id="teacher-class-list"></div>
-          <form class="admin-form teacher-class-form" id="teacher-class-form">
-            <h3>Schedule a live class</h3>
-            <div class="admin-form-grid">
-              <div><label for="live-module">Course module</label><select id="live-module" required></select></div>
-              <div><label for="live-class-title">Class title</label><input id="live-class-title" maxlength="160" required></div>
-              <div><label for="live-start-time">Start time</label><input id="live-start-time" type="datetime-local" required></div>
-              <div><label for="live-meeting-url">Meeting link</label><input id="live-meeting-url" type="url" placeholder="https://..." required></div>
-            </div>
-            <p class="admin-field-hint">Meeting links open through your configured secure meeting provider. Learner module-access rules also apply.</p>
-            <button class="button button-orange" type="submit">Schedule class <span aria-hidden="true">↗</span></button>
-          </form>
-        </section>
-        <section class="admin-panel teacher-schedule-panel">
-          <div class="admin-panel-heading"><div><p class="micro-label">Teaching materials</p><h2>Your programme modules</h2></div></div>
-          <div class="teacher-module-list" id="teacher-module-list"></div>
-        </section>
       </section>
 
       <section class="teacher-room" id="teacher-room" hidden>

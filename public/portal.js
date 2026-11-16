@@ -75,6 +75,7 @@ function renderDashboard(account) {
     setMessage(passwordMessage, "Change your temporary password to secure your account.");
   } else {
     setMessage(passwordMessage, "");
+    if (account.role !== "administrator") window.dispatchEvent(new Event("tgf-account-authenticated"));
   }
 }
 

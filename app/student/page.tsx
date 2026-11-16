@@ -1,6 +1,7 @@
-import { readFile } from "node:fs/promises";
-import path from "node:path";
 import Script from "next/script";
+
+import PdfPageRenderer from "../components/pdf-page-renderer";
+import { loadPageBody } from "../lib/static-page";
 
 export const metadata = {
   title: "Student learning space | TGF Vocational Pathways",
@@ -10,14 +11,15 @@ export const metadata = {
 export const dynamic = "force-dynamic";
 
 export default async function StudentPage() {
-  const document = await readFile(path.join(process.cwd(), "student.html"), "utf8");
-  const body = document.match(/<body\b[^>]*>([\s\S]*?)<\/body>/i)?.[1];
-  if (!body) throw new Error("Could not load the TGFVP student learning space.");
+  const body = await loadPageBody("student.html", "TGFVP student learning space");
 
   return (
     <>
       <div dangerouslySetInnerHTML={{ __html: body }} />
+      <PdfPageRenderer />
       <Script src="/classroom.js" strategy="afterInteractive" />
+      <Script src="/messages.js" strategy="afterInteractive" />
+      <Script src="/collaboration.js" strategy="afterInteractive" />
     </>
   );
 }

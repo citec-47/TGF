@@ -1,13 +1,15 @@
 import type { Metadata } from "next";
 import type { ReactNode } from "react";
 import "../styles.css";
+import "../corporate.css";
 import "../admin.css";
 
 export const metadata: Metadata = {
-  title: "TGF Vocational Pathways | Skills for what's next",
+  metadataBase: new URL("https://www.transgenerationalforces.com"),
+  title: "Transgenerational Forces Group | Base For Better Living",
   description:
-    "Explore TGF Vocational Pathways programmes, training locations and admissions information.",
-  applicationName: "TGF Vocational Pathways",
+    "Transgenerational Forces Group creates solutions that improve everyday life and build a lasting impact across generations.",
+  applicationName: "Transgenerational Forces Group",
   referrer: "strict-origin-when-cross-origin",
 };
 

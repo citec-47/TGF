@@ -42,6 +42,13 @@ export function verifyPassword(password, storedHash) {
   }
 }
 
+export function validateAccountPassword(password) {
+  if (typeof password !== "string" || password.length < 14 || password.length > 1024) {
+    return { error: "Choose a password between 14 and 1024 characters." };
+  }
+  return { password };
+}
+
 export function validateAccount(value) {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     return { error: "Enter valid account details and try again." };
@@ -67,6 +74,20 @@ export function validateAccount(value) {
     return { error: "Choose a valid group company or subsidiary." };
   }
   return { account: { fullName, email, role, subsidiary } };
+}
+
+export function validateAccountReview(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return { error: "Choose approve or reject." };
+  }
+  if (value.action !== "approve" && value.action !== "reject") {
+    return { error: "Choose approve or reject." };
+  }
+  const reason = typeof value.reason === "string" ? value.reason.trim() : "";
+  if (value.action === "reject" && (reason.length < 5 || reason.length > 500)) {
+    return { error: "Enter a rejection reason between 5 and 500 characters." };
+  }
+  return { review: { action: value.action, reason: value.action === "reject" ? reason : "" } };
 }
 
 export function generateTemporaryPassword() {

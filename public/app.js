@@ -22,6 +22,10 @@ async function loadSiteSettings() {
     if (flyer instanceof HTMLImageElement && typeof settings.flyerImageUrl === "string") {
       flyer.src = settings.flyerImageUrl;
     }
+    const flyerDate = document.querySelector("#flyer-date-overlay");
+    if (flyerDate && typeof settings.flyerDateText === "string") {
+      flyerDate.textContent = settings.flyerDateText;
+    }
 
     const resumptionTitle = document.querySelector("#resumption-title");
     const resumptionCopy = document.querySelector("#resumption-copy");

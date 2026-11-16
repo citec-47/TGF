@@ -3,6 +3,7 @@ export const SITE_SETTING_DEFAULTS = Object.freeze({
   resumptionLabel: "Training resumes",
   accentColor: "#F47D20",
   flyerImageUrl: "/TWO/WhatsApp%20Image%202026-10-29%20at%2021.12.52.jpeg",
+  flyerDateText: "AUGUST 1ST TO OCTOBER 30TH",
 });
 
 export function isValidAccentColor(value) {
@@ -24,7 +25,7 @@ export function validateSiteSettings(value, cloudName) {
     return { error: "Enter valid website settings and try again." };
   }
 
-  const { resumptionDate, resumptionLabel, accentColor, flyerImageUrl } = value;
+  const { resumptionDate, resumptionLabel, accentColor, flyerImageUrl, flyerDateText } = value;
   if (
     typeof resumptionDate !== "string" ||
     (resumptionDate !== "" && !/^\d{4}-\d{2}-\d{2}$/.test(resumptionDate))
@@ -73,6 +74,13 @@ export function validateSiteSettings(value, cloudName) {
   if (!validCloudinaryImage) {
     return { error: "Upload the flyer to the configured TGF Cloudinary account first." };
   }
+  if (
+    typeof flyerDateText !== "string" ||
+    !flyerDateText.trim() ||
+    flyerDateText.trim().length > 64
+  ) {
+    return { error: "Enter flyer date text of at most 64 characters." };
+  }
 
   return {
     settings: {
@@ -80,6 +88,7 @@ export function validateSiteSettings(value, cloudName) {
       resumptionLabel: resumptionLabel.trim(),
       accentColor: accentColor.toUpperCase(),
       flyerImageUrl,
+      flyerDateText: flyerDateText.trim().toUpperCase(),
     },
   };
 }
