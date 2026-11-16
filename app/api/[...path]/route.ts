@@ -3,7 +3,7 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { Pool } from "pg";
 import type { PoolClient } from "pg";
-import { createCloudinarySignature, validateLocation } from "../../../api/location-validation.js";
+import { createCloudinarySignature, validateLocation } from "../../../server/location-validation.js";
 import {
   generateTemporaryPassword,
   hashPassword,
@@ -11,16 +11,16 @@ import {
   validateAccountPassword,
   validateAccountReview,
   verifyPassword,
-} from "../../../api/account-security.js";
+} from "../../../server/account-security.js";
 import {
   DEFAULT_MESSAGE_ATTACHMENT_MAX_BYTES,
   MAX_MESSAGE_ATTACHMENTS,
   validateMessageAttachment,
-} from "../../../api/message-validation.js";
+} from "../../../server/message-validation.js";
 import {
   SITE_SETTING_DEFAULTS,
   validateSiteSettings,
-} from "../../../api/site-settings.js";
+} from "../../../server/site-settings.js";
 import {
   getBoardGroups,
   getNextInstallmentPayment,
@@ -31,30 +31,30 @@ import {
   validateProgramme,
   validateTeacherProfile,
   validateWhiteboardStrokes,
-} from "../../../api/learning-validation.js";
+} from "../../../server/learning-validation.js";
 import {
   getPrivateCloudinaryUploadMismatches,
   getPrivateFileType,
-} from "../../../api/private-file-validation.js";
+} from "../../../server/private-file-validation.js";
 import {
   validateGeneratedCurriculum,
-} from "../../../api/course-curriculum.js";
-import { validatePublicSubmission } from "../../../api/public-submissions-validation.js";
+} from "../../../server/course-curriculum.js";
+import { validatePublicSubmission } from "../../../server/public-submissions-validation.js";
 import {
   DEFAULT_CORPORATE_CONTENT,
   validateCorporateContent,
-} from "../../../api/corporate-content-validation.js";
-import type { CorporateContent } from "../../../api/corporate-content-validation.js";
+} from "../../../server/corporate-content-validation.js";
+import type { CorporateContent } from "../../../server/corporate-content-validation.js";
 import {
   buildDocumentCurriculum,
-} from "../../../api/document-curriculum.js";
+} from "../../../server/document-curriculum.js";
 import {
   generateOpenAICurriculum,
-} from "../../../api/openai-curriculum.js";
+} from "../../../server/openai-curriculum.js";
 import {
   handleCollaborationRequest,
   publishCollaborationEvent,
-} from "../../../api/collaboration";
+} from "../../../server/collaboration";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
