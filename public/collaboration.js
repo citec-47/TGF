@@ -24,6 +24,7 @@
     countdownTimer: 0,
     serverNow: 0,
     serverClockStarted: 0,
+    liveGroups: [],
   };
 
   function element(tag, className = "", text = "") {
@@ -31,6 +32,109 @@
     if (className) item.className = className;
     if (text) item.textContent = text;
     return item;
+  }
+
+  function updateLiveGroupControls(form) {
+    const course = form.querySelector("[data-go-live-course]");
+    const group = form.querySelector("[data-go-live-group]");
+    const name = form.querySelector("[data-live-group-name]");
+    const members = form.querySelector("[data-live-group-members]");
+    const save = form.querySelector("[data-live-group-save]");
+    const submit = form.querySelector("[data-go-live-submit]");
+    if (!course || !group || !name || !members || !save || !submit) return;
+    const selectedMembers = members.querySelectorAll("input[type=checkbox]:checked").length;
+    const savedGroup = state.liveGroups.find((item) => item.id === group.value);
+    const selectedIds = Array.from(
+      members.querySelectorAll("input[type=checkbox]:checked"),
+      (input) => input.value,
+    ).sort();
+    const savedIds = [...(savedGroup?.memberIds || [])].sort();
+    const groupHasUnsavedChanges = !savedGroup ||
+      name.value.trim() !== savedGroup.name ||
+      selectedIds.length !== savedIds.length ||
+      selectedIds.some((id, index) => id !== savedIds[index]);
+    save.disabled = !course.value || name.value.trim().length < 2 || selectedMembers === 0;
+    submit.disabled = !course.value || !savedGroup || groupHasUnsavedChanges;
+  }
+
+  function renderLiveGroupMembers(form, students, selectedIds = []) {
+    const members = form.querySelector("[data-live-group-members]");
+    if (!members) return;
+    members.replaceChildren();
+    if (!students.length) {
+      members.append(element("p", "admin-empty", "No active, approved learners are enrolled in this course."));
+      return;
+    }
+    const selected = new Set(selectedIds);
+    for (const student of students) {
+      const label = element("label", "live-group-member");
+      const checkbox = document.createElement("input");
+      checkbox.type = "checkbox";
+      checkbox.value = student.id;
+      checkbox.checked = selected.has(student.id);
+      checkbox.addEventListener("change", () => updateLiveGroupControls(form));
+      const copy = element("span", "live-group-member-copy");
+      copy.append(
+        element("strong", "", student.fullName),
+        element("small", "", student.email),
+      );
+      label.append(checkbox, copy);
+      members.append(label);
+    }
+  }
+
+  async function loadLiveGroupEditor(form, selectedGroupId = "new") {
+    const course = form.querySelector("[data-go-live-course]");
+    const groupSelect = form.querySelector("[data-go-live-group]");
+    const name = form.querySelector("[data-live-group-name]");
+    const members = form.querySelector("[data-live-group-members]");
+    const save = form.querySelector("[data-live-group-save]");
+    const status = form.querySelector("[data-go-live-status]");
+    if (!course || !groupSelect || !name || !members || !save) return false;
+    groupSelect.replaceChildren();
+    const placeholder = element("option", "", "Choose or create a group");
+    placeholder.value = "";
+    placeholder.disabled = true;
+    placeholder.selected = true;
+    groupSelect.append(placeholder);
+    state.liveGroups = [];
+    if (!course.value) {
+      groupSelect.disabled = false;
+      name.value = "";
+      renderLiveGroupMembers(form, []);
+      members.replaceChildren(element("p", "admin-empty", "Choose a course to load eligible students."));
+      setStatus(status, "");
+      updateLiveGroupControls(form);
+      return true;
+    }
+    try {
+      groupSelect.disabled = false;
+      const result = await request(`/api/collaboration/live-groups?programmeId=${encodeURIComponent(course.value)}`);
+      state.liveGroups = result.groups || [];
+      const createOption = element("option", "", "Create a new group");
+      createOption.value = "new";
+      groupSelect.append(createOption);
+      for (const group of state.liveGroups) {
+        const option = element("option", "", group.name);
+        option.value = group.id;
+        groupSelect.append(option);
+      }
+      const selectedGroup = state.liveGroups.find((group) => group.id === selectedGroupId);
+      groupSelect.value = selectedGroup ? selectedGroup.id : "new";
+      name.value = selectedGroup ? selectedGroup.name : "";
+      renderLiveGroupMembers(form, result.students || [], selectedGroup?.memberIds || []);
+      setStatus(status, "");
+      updateLiveGroupControls(form);
+      return true;
+    } catch (error) {
+      groupSelect.disabled = true;
+      name.value = "";
+      renderLiveGroupMembers(form, []);
+      members.replaceChildren(element("p", "admin-empty", "Eligible students could not be loaded."));
+      save.disabled = true;
+      setStatus(status, error.message, true);
+      return false;
+    }
   }
 
   async function loadGoLiveCourses() {
@@ -51,8 +155,10 @@
         option.value = programme.id;
         select.append(option);
       }
-      submit.disabled = programmes.length === 0;
+      select.disabled = programmes.length === 0;
+      submit.disabled = true;
       setStatus(form.querySelector("[data-go-live-status]"), "");
+      await loadLiveGroupEditor(form);
     } catch (error) {
       submit.disabled = true;
       setStatus(form.querySelector("[data-go-live-status]"), error.message, true);
@@ -63,27 +169,78 @@
     const form = document.querySelector("[data-collab-go-live]");
     if (!form || form.dataset.initialized) return;
     form.dataset.initialized = "true";
+    const course = form.querySelector("[data-go-live-course]");
+    const group = form.querySelector("[data-go-live-group]");
+    const name = form.querySelector("[data-live-group-name]");
+    const save = form.querySelector("[data-live-group-save]");
+    const members = form.querySelector("[data-live-group-members]");
+    course?.addEventListener("change", () => void loadLiveGroupEditor(form));
+    group?.addEventListener("change", () => {
+      const selected = state.liveGroups.find((item) => item.id === group.value);
+      name.value = selected ? selected.name : "";
+      const editor = form.querySelector("[data-live-group-members]");
+      if (editor) {
+        const studentIds = Array.from(editor.querySelectorAll("input[type=checkbox]"), (input) => input.value);
+        const selectedIds = new Set(selected?.memberIds || []);
+        editor.querySelectorAll("input[type=checkbox]").forEach((input) => {
+          input.checked = selectedIds.has(input.value);
+        });
+        if (!studentIds.length) renderLiveGroupMembers(form, []);
+      }
+      updateLiveGroupControls(form);
+    });
+    name?.addEventListener("input", () => updateLiveGroupControls(form));
+    members?.addEventListener("change", () => updateLiveGroupControls(form));
+    save?.addEventListener("click", async () => {
+      const selectedMembers = Array.from(
+        members.querySelectorAll("input[type=checkbox]:checked"),
+        (input) => input.value,
+      );
+      const existingGroupId = group.value && group.value !== "new" ? group.value : "";
+      save.disabled = true;
+      setStatus(form.querySelector("[data-go-live-status]"), "Saving the student group…");
+      try {
+        const result = await request("/api/collaboration/live-groups", {
+          method: "POST",
+          body: JSON.stringify({
+            programmeId: course.value,
+            groupId: existingGroupId || null,
+            name: name.value.trim(),
+            memberIds: selectedMembers,
+          }),
+        });
+        const loaded = await loadLiveGroupEditor(form, result.groupId);
+        if (loaded) {
+          setStatus(form.querySelector("[data-go-live-status]"), `Group saved with ${selectedMembers.length} student${selectedMembers.length === 1 ? "" : "s"}.`);
+        }
+      } catch (error) {
+        setStatus(form.querySelector("[data-go-live-status]"), error.message, true);
+      } finally {
+        updateLiveGroupControls(form);
+      }
+    });
     form.addEventListener("submit", async (event) => {
       event.preventDefault();
       if (!form.reportValidity()) return;
       const submit = form.querySelector("[data-go-live-submit]");
       submit.disabled = true;
-      setStatus(form.querySelector("[data-go-live-status]"), "Preparing your class and inviting enrolled students…");
+      setStatus(form.querySelector("[data-go-live-status]"), "Preparing your class and inviting the selected group…");
       try {
         const result = await request("/api/collaboration/live-sessions", {
           method: "POST",
-          body: JSON.stringify({ programmeId: form.querySelector("[data-go-live-course]").value }),
+          body: JSON.stringify({ groupId: group.value }),
         });
         setStatus(
           form.querySelector("[data-go-live-status]"),
-          `${result.invitedCount} approved student${result.invitedCount === 1 ? "" : "s"} invited. Recording starts automatically as you enter.`,
+          `${result.invitedCount} student${result.invitedCount === 1 ? "" : "s"} invited. Recording starts automatically as you enter.`,
         );
+        void loadLiveSessions();
         window.setTimeout(() => {
           window.location.assign(`/live-class?sessionId=${encodeURIComponent(result.sessionId)}`);
         }, 500);
       } catch (error) {
         setStatus(form.querySelector("[data-go-live-status]"), error.message, true);
-        submit.disabled = false;
+        updateLiveGroupControls(form);
       }
     });
   }
@@ -798,7 +955,12 @@
       const isEnded = countdown.dataset.sessionStatus === "ended" || now > end;
       const joinAvailable = state.account?.role !== "administrator" &&
         !isEnded && now >= start - 15 * 60 * 1000 && now <= end;
-      if (button) button.hidden = !joinAvailable;
+      if (button) {
+        button.hidden = false;
+        button.disabled = !joinAvailable;
+        button.textContent = isEnded ? "Class ended"
+          : joinAvailable ? "Join live class" : "Join opens 15 minutes before class";
+      }
       if (isEnded) {
         countdown.textContent = "Class ended";
       } else if (now < start) {
@@ -857,7 +1019,8 @@
           window.location.href = `/live-class?slotId=${encodeURIComponent(item.slotId)}&date=${encodeURIComponent(item.classDate)}`;
         }, "button button-orange live-class-join");
         button.dataset.liveJoin = "";
-        button.hidden = true;
+        button.disabled = true;
+        button.textContent = "Join opens 15 minutes before class";
         countdownPanel.append(button);
       }
       card.append(dateCard, details, countdownPanel);
@@ -866,6 +1029,62 @@
       card.append(element("p", "admin-location-subtitle", `Time in class: ${Math.floor(item.attendanceSeconds / 60)} minutes`));
     }
     return card;
+  }
+
+  function renderLiveSession(item) {
+    const card = element("article", "collaboration-schedule-card live-class-card live-session-card");
+    const isLive = Boolean(item.startedAt);
+    const heading = element("div", "live-class-card-heading");
+    heading.append(
+      element("span", `live-class-status${isLive ? " is-live" : ""}`, isLive ? "Live now" : "Waiting for tutor"),
+      element("span", "live-class-timezone", item.groupName || "Invited group"),
+    );
+    card.append(
+      heading,
+      element("h3", "", item.programmeTitle),
+      element("p", "live-class-tutor", state.account?.role === "teacher"
+        ? `${item.invitedCount} student${item.invitedCount === 1 ? "" : "s"} invited`
+        : `Tutor · ${item.teacherName}`),
+      element("p", "admin-location-subtitle", isLive
+        ? "Your tutor has started this class."
+        : "The waiting room is open. Your class will begin when the tutor starts the lesson."),
+    );
+    card.append(makeButton(
+      state.account?.role === "teacher" ? "Open live class" : "Join live class",
+      () => {
+        window.location.href = `/live-class?sessionId=${encodeURIComponent(item.sessionId)}`;
+      },
+      "button button-orange live-class-join",
+    ));
+    return card;
+  }
+
+  async function loadLiveSessions() {
+    const lists = document.querySelectorAll("[data-collab-live-sessions]");
+    if (!lists.length) return;
+    try {
+      const result = await request("/api/collaboration/live-sessions");
+      for (const list of lists) {
+        list.classList.add("live-class-grid");
+        list.replaceChildren();
+        if (!result.sessions?.length) setEmpty(list, "No live class invitations are waiting.");
+        else list.append(...result.sessions.map((session) => renderLiveSession(session)));
+      }
+    } catch (error) {
+      lists.forEach((list) => setEmpty(list, error.message));
+    }
+  }
+
+  function getCameroonDate(value) {
+    if (!Number.isFinite(Date.parse(value))) return "";
+    const parts = new Intl.DateTimeFormat("en", {
+      timeZone: "Africa/Douala",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    }).formatToParts(new Date(value));
+    const datePart = (type) => parts.find((part) => part.type === type)?.value || "";
+    return `${datePart("year")}-${datePart("month")}-${datePart("day")}`;
   }
 
   async function loadSchedule() {
@@ -885,11 +1104,20 @@
       ]);
       syncServerClock(result.serverNow);
       const upcoming = result.occurrences.filter((item) => item.attendanceStatus === "upcoming");
+      const today = getCameroonDate(result.serverNow);
+      const dashboardOccurrence = upcoming.find((item) => item.classDate === today) || upcoming[0];
       for (const list of liveClassLists) {
         list.classList.add("live-class-grid");
         list.replaceChildren();
-        if (!upcoming.length) setEmpty(list, "No upcoming live classes are scheduled.");
-        else list.append(...upcoming.map((item) => renderOccurrence(item)));
+        const isOverview = list.hasAttribute("data-collab-live-overview");
+        const occurrences = isOverview
+          ? dashboardOccurrence ? [dashboardOccurrence] : []
+          : upcoming;
+        if (!occurrences.length) {
+          setEmpty(list, isOverview
+            ? "No live classes are scheduled for today or the next available date."
+            : "No upcoming live classes are scheduled.");
+        } else list.append(...occurrences.map((item) => renderOccurrence(item)));
       }
       updateLiveClassCountdowns();
       if (timetable) {
@@ -1127,6 +1355,7 @@
   function refreshAll() {
     void loadTimetables();
     void loadSchedule();
+    void loadLiveSessions();
     void loadRecordings();
     void loadNotifications();
     document.querySelectorAll("[data-collaboration-root]").forEach((root) => void loadChatContacts(root));
@@ -1167,6 +1396,7 @@
         void loadNotifications();
         void loadTimetables();
         void loadSchedule();
+        void loadLiveSessions();
       }
       if (event.type === "recording-ready") void loadNotifications();
     };

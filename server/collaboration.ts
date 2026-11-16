@@ -1510,6 +1510,255 @@ function isRecordingPipelineConfigured(): boolean {
   );
 }
 
+async function listTeacherLiveGroups(
+  programmeId: string,
+  account: CollaborationAccount,
+  services: CollaborationServices,
+): Promise<Response> {
+  if (account.role !== "teacher") {
+    return services.jsonResponse(403, { error: "Teacher access is required to manage live-class groups." });
+  }
+  const assignment = await services.pool.query(
+    `SELECT 1
+     FROM tgf_programme_teachers assignment
+     JOIN tgf_programmes programme ON programme.id = assignment.programme_id
+     WHERE assignment.teacher_id = $1 AND assignment.programme_id = $2
+       AND programme.is_active = TRUE AND programme.deleted_at IS NULL`,
+    [account.id, programmeId],
+  );
+  if (!assignment.rowCount) {
+    return services.jsonResponse(403, { error: "You can only manage groups for an assigned course." });
+  }
+  const [students, groups] = await Promise.all([
+    services.pool.query<{ id: string; full_name: string; email: string }>(
+      `SELECT learner.id, learner.full_name, learner.email
+       FROM tgf_users learner
+       WHERE learner.role = 'learner' AND learner.account_status = 'active'
+         AND learner.is_frozen = FALSE
+         AND EXISTS (
+           SELECT 1 FROM tgf_enrollments enrollment
+           WHERE enrollment.user_id = learner.id
+             AND enrollment.programme_id = $1
+             AND enrollment.approval_status = 'approved'
+         )
+       ORDER BY lower(learner.full_name), learner.id`,
+      [programmeId],
+    ),
+    services.pool.query<{ id: string; name: string; member_ids: string[] }>(
+      `SELECT live_group.id, live_group.name,
+              COALESCE((
+                SELECT jsonb_agg(group_member.user_id::text ORDER BY lower(learner.full_name))
+                FROM tgf_live_class_group_members group_member
+                JOIN tgf_users learner ON learner.id = group_member.user_id
+                  AND learner.role = 'learner' AND learner.account_status = 'active'
+                  AND learner.is_frozen = FALSE
+                WHERE group_member.group_id = live_group.id
+                  AND EXISTS (
+                    SELECT 1 FROM tgf_enrollments enrollment
+                    WHERE enrollment.user_id = group_member.user_id
+                      AND enrollment.programme_id = live_group.programme_id
+                      AND enrollment.approval_status = 'approved'
+                  )
+              ), '[]'::jsonb) AS member_ids
+       FROM tgf_live_class_groups live_group
+       WHERE live_group.teacher_id = $1 AND live_group.programme_id = $2
+       ORDER BY lower(live_group.name), live_group.created_at`,
+      [account.id, programmeId],
+    ),
+  ]);
+  return services.jsonResponse(200, {
+    students: students.rows.map((row) => ({
+      id: row.id,
+      fullName: row.full_name,
+      email: row.email,
+    })),
+    groups: groups.rows.map((row) => ({
+      id: row.id,
+      name: row.name,
+      memberIds: row.member_ids,
+    })),
+  });
+}
+
+async function saveTeacherLiveGroup(
+  request: Request,
+  account: CollaborationAccount,
+  services: CollaborationServices,
+): Promise<Response> {
+  if (account.role !== "teacher") {
+    return services.jsonResponse(403, { error: "Teacher access is required to manage live-class groups." });
+  }
+  const body = await readJson(request);
+  const programmeId = typeof body.programmeId === "string" ? body.programmeId : "";
+  const groupId = typeof body.groupId === "string" ? body.groupId.trim() : "";
+  const name = typeof body.name === "string" ? body.name.trim() : "";
+  if (!isUuid(programmeId)) {
+    return services.jsonResponse(400, { error: "Choose an assigned course." });
+  }
+  if (groupId && !isUuid(groupId)) {
+    return services.jsonResponse(400, { error: "Choose a valid saved group." });
+  }
+  if (name.length < 2 || name.length > 80) {
+    return services.jsonResponse(400, { error: "Enter a group name between 2 and 80 characters." });
+  }
+  if (!Array.isArray(body.memberIds) || body.memberIds.length === 0 || body.memberIds.length > 200 ||
+      body.memberIds.some((id) => typeof id !== "string" || !isUuid(id))) {
+    return services.jsonResponse(400, { error: "Select between 1 and 200 eligible students." });
+  }
+  const memberIds = body.memberIds as string[];
+  if (new Set(memberIds).size !== memberIds.length) {
+    return services.jsonResponse(400, { error: "Each student can only be selected once." });
+  }
+
+  const client = await services.pool.connect();
+  try {
+    await client.query("BEGIN");
+    const assignment = await client.query(
+      `SELECT programme.id
+       FROM tgf_programme_teachers assignment
+       JOIN tgf_programmes programme ON programme.id = assignment.programme_id
+       WHERE assignment.teacher_id = $1 AND assignment.programme_id = $2
+         AND programme.is_active = TRUE AND programme.deleted_at IS NULL
+       FOR SHARE OF assignment, programme`,
+      [account.id, programmeId],
+    );
+    if (!assignment.rowCount) {
+      await client.query("ROLLBACK");
+      return services.jsonResponse(403, { error: "You can only manage groups for an assigned course." });
+    }
+
+    const eligibleMembers = await client.query<{ id: string }>(
+      `SELECT learner.id
+       FROM unnest($2::uuid[]) AS selected(user_id)
+       JOIN tgf_users learner ON learner.id = selected.user_id
+         AND learner.role = 'learner' AND learner.account_status = 'active'
+         AND learner.is_frozen = FALSE
+       WHERE EXISTS (
+         SELECT 1 FROM tgf_enrollments enrollment
+         WHERE enrollment.user_id = learner.id
+           AND enrollment.programme_id = $1
+           AND enrollment.approval_status = 'approved'
+       )
+       ORDER BY learner.id
+       FOR SHARE OF learner`,
+      [programmeId, memberIds],
+    );
+    if (eligibleMembers.rowCount !== memberIds.length) {
+      await client.query("ROLLBACK");
+      return services.jsonResponse(400, {
+        error: "Groups can include only active, approved students enrolled in this course.",
+      });
+    }
+
+    let savedGroupId = groupId;
+    if (groupId) {
+      const updated = await client.query<{ id: string }>(
+        `UPDATE tgf_live_class_groups
+         SET name = $4, updated_at = NOW()
+         WHERE id = $1 AND teacher_id = $2 AND programme_id = $3
+         RETURNING id`,
+        [groupId, account.id, programmeId, name],
+      );
+      if (!updated.rowCount) {
+        await client.query("ROLLBACK");
+        return services.jsonResponse(404, { error: "This saved group could not be found." });
+      }
+      savedGroupId = updated.rows[0].id;
+    } else {
+      const created = await client.query<{ id: string }>(
+        `INSERT INTO tgf_live_class_groups (teacher_id, programme_id, name)
+         VALUES ($1, $2, $3)
+         RETURNING id`,
+        [account.id, programmeId, name],
+      );
+      savedGroupId = created.rows[0].id;
+    }
+    await client.query(
+      `DELETE FROM tgf_live_class_group_members WHERE group_id = $1`,
+      [savedGroupId],
+    );
+    await client.query(
+      `INSERT INTO tgf_live_class_group_members (group_id, user_id)
+       SELECT $1, selected.user_id
+       FROM unnest($2::uuid[]) AS selected(user_id)`,
+      [savedGroupId, memberIds],
+    );
+    await client.query("COMMIT");
+    return services.jsonResponse(groupId ? 200 : 201, {
+      groupId: savedGroupId,
+      name,
+      memberIds,
+    });
+  } catch (error) {
+    await client.query("ROLLBACK");
+    if (error && typeof error === "object" && "code" in error &&
+        String((error as { code: unknown }).code) === "23505") {
+      return services.jsonResponse(409, { error: "A group with this name already exists for the selected course." });
+    }
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+async function listLiveSessions(
+  account: CollaborationAccount,
+  services: CollaborationServices,
+): Promise<Response> {
+  if (account.role !== "teacher" && account.role !== "learner") {
+    return services.jsonResponse(403, { error: "Teacher or learner access is required." });
+  }
+  const result = await services.pool.query<{
+    id: string;
+    programme_title: string;
+    teacher_name: string;
+    group_name: string | null;
+    started_at: Date | null;
+    invited_count: number;
+  }>(
+    `SELECT session.id, programme.title AS programme_title,
+            teacher.full_name AS teacher_name, live_group.name AS group_name,
+            session.started_at,
+            (SELECT COUNT(*)::int FROM tgf_live_session_invites invite
+             WHERE invite.session_id = session.id) AS invited_count
+     FROM tgf_live_sessions session
+     JOIN tgf_programmes programme ON programme.id = session.programme_id
+       AND programme.is_active = TRUE AND programme.deleted_at IS NULL
+     JOIN tgf_users teacher ON teacher.id = session.teacher_id
+       AND teacher.role = 'teacher' AND teacher.account_status = 'active'
+       AND teacher.is_frozen = FALSE
+     LEFT JOIN tgf_live_class_groups live_group ON live_group.id = session.group_id
+     WHERE session.timetable_slot_id IS NULL
+       AND session.ended_at IS NULL
+       AND session.created_at >= NOW() - INTERVAL '48 hours'
+       AND (
+         ($2 = 'teacher' AND session.teacher_id = $1) OR
+         ($2 = 'learner' AND EXISTS (
+           SELECT 1
+           FROM tgf_live_session_invites invite
+           JOIN tgf_enrollments enrollment
+             ON enrollment.user_id = invite.user_id
+            AND enrollment.programme_id = session.programme_id
+            AND enrollment.approval_status = 'approved'
+           WHERE invite.session_id = session.id AND invite.user_id = $1
+         ))
+       )
+     ORDER BY session.created_at DESC
+     LIMIT 100`,
+    [account.id, account.role],
+  );
+  return services.jsonResponse(200, {
+    sessions: result.rows.map((row) => ({
+      sessionId: row.id,
+      programmeTitle: row.programme_title,
+      teacherName: row.teacher_name,
+      groupName: row.group_name,
+      startedAt: row.started_at?.toISOString() || null,
+      invitedCount: Number(row.invited_count),
+    })),
+  });
+}
+
 async function createInstantSession(
   request: Request,
   account: CollaborationAccount,
@@ -1519,60 +1768,90 @@ async function createInstantSession(
     return services.jsonResponse(403, { error: "Only a teacher can start a live class." });
   }
   const body = await readJson(request);
-  const programmeId = typeof body.programmeId === "string" ? body.programmeId : "";
-  if (!isUuid(programmeId)) {
-    return services.jsonResponse(400, { error: "Choose an assigned course." });
+  const groupId = typeof body.groupId === "string" ? body.groupId : "";
+  if (!isUuid(groupId)) {
+    return services.jsonResponse(400, { error: "Choose one of your saved student groups." });
   }
   if (!isRecordingPipelineConfigured()) {
     return services.jsonResponse(503, {
       error: "LiveKit, recording storage, and Cloudinary must be configured before a live class can start.",
     });
   }
-  const programme = await services.pool.query<{ title: string }>(
-    `SELECT programme.title
-     FROM tgf_programme_teachers assignment
-     JOIN tgf_programmes programme ON programme.id = assignment.programme_id
-     WHERE assignment.teacher_id = $1 AND assignment.programme_id = $2
-       AND programme.is_active = TRUE AND programme.deleted_at IS NULL`,
-    [account.id, programmeId],
-  );
-  const course = programme.rows[0];
-  if (!course) {
-    return services.jsonResponse(403, { error: "You can only start a live class for an assigned course." });
-  }
 
   const sessionId = randomUUID();
   const roomName = `tgf-live-${randomUUID()}`;
   const client = await services.pool.connect();
   let invitedStudents: string[] = [];
+  let programmeTitle = "";
   try {
     await client.query("BEGIN");
-    await client.query(
-      `INSERT INTO tgf_live_sessions
-         (id, timetable_slot_id, programme_id, teacher_id, class_date, room_name)
-       VALUES ($1, NULL, $2, $3, (NOW() AT TIME ZONE 'Africa/Douala')::date, $4)`,
-      [sessionId, programmeId, account.id, roomName],
+    const groupResult = await client.query<{ programme_id: string; programme_title: string }>(
+      `SELECT live_group.programme_id, programme.title AS programme_title
+       FROM tgf_live_class_groups live_group
+       JOIN tgf_programme_teachers assignment
+         ON assignment.programme_id = live_group.programme_id
+        AND assignment.teacher_id = live_group.teacher_id
+       JOIN tgf_programmes programme
+         ON programme.id = live_group.programme_id
+        AND programme.is_active = TRUE AND programme.deleted_at IS NULL
+       WHERE live_group.id = $1 AND live_group.teacher_id = $2
+       FOR SHARE OF live_group, assignment, programme`,
+      [groupId, account.id],
     );
-    const invitations = await client.query<{ user_id: string }>(
-      `INSERT INTO tgf_notifications
-         (user_id, target_role, notification_type, title, body, data)
-       SELECT enrollment.user_id, NULL, 'live-class-invitation',
-              'Your tutor is live',
-              $2,
-              jsonb_build_object('liveSessionId', $3::text, 'programmeId', $1::text)
-       FROM tgf_enrollments enrollment
-       JOIN tgf_users learner ON learner.id = enrollment.user_id
+    const group = groupResult.rows[0];
+    if (!group) {
+      await client.query("ROLLBACK");
+      return services.jsonResponse(403, { error: "Choose a group saved for one of your assigned courses." });
+    }
+    programmeTitle = group.programme_title;
+    const members = await client.query<{ user_id: string }>(
+      `SELECT group_member.user_id
+       FROM tgf_live_class_group_members group_member
+       JOIN tgf_enrollments enrollment
+         ON enrollment.user_id = group_member.user_id
+        AND enrollment.programme_id = $2
+        AND enrollment.approval_status = 'approved'
+       JOIN tgf_users learner ON learner.id = group_member.user_id
          AND learner.role = 'learner' AND learner.account_status = 'active'
          AND learner.is_frozen = FALSE
-       WHERE enrollment.programme_id = $1 AND enrollment.approval_status = 'approved'
-       RETURNING user_id`,
+       WHERE group_member.group_id = $1
+       ORDER BY group_member.user_id
+       FOR SHARE OF group_member, enrollment, learner`,
+      [groupId, group.programme_id],
+    );
+    if (!members.rowCount) {
+      await client.query("ROLLBACK");
+      return services.jsonResponse(409, { error: "This group has no currently eligible students. Update the group and try again." });
+    }
+    invitedStudents = members.rows.map((row) => row.user_id);
+    await client.query(
+      `INSERT INTO tgf_live_sessions
+         (id, timetable_slot_id, programme_id, teacher_id, group_id, class_date, room_name)
+       VALUES ($1, NULL, $2, $3, $4, (NOW() AT TIME ZONE 'Africa/Douala')::date, $5)`,
+      [sessionId, group.programme_id, account.id, groupId, roomName],
+    );
+    await client.query(
+      `INSERT INTO tgf_live_session_invites (session_id, user_id)
+       SELECT $1, selected.user_id
+       FROM unnest($2::uuid[]) AS selected(user_id)`,
+      [sessionId, invitedStudents],
+    );
+    await client.query(
+      `INSERT INTO tgf_notifications
+         (user_id, target_role, notification_type, title, body, data)
+       SELECT invite.user_id, NULL, 'live-class-invitation',
+              'Live class invitation',
+              $2,
+              jsonb_build_object('liveSessionId', $3::text, 'programmeId', $4::text)
+       FROM tgf_live_session_invites invite
+       WHERE invite.session_id = $1`,
       [
-        programmeId,
-        `${account.full_name} is inviting you to a live class for ${course.title}. Join from this notification; you will enter when the tutor starts.`,
         sessionId,
+        `${account.full_name} has invited you to a live class for ${group.programme_title}. Open the class from your dashboard; you can wait there until the tutor starts.`,
+        sessionId,
+        group.programme_id,
       ],
     );
-    invitedStudents = invitations.rows.map((row) => row.user_id);
     await client.query("COMMIT");
   } catch (error) {
     await client.query("ROLLBACK");
@@ -1586,7 +1865,7 @@ async function createInstantSession(
   return services.jsonResponse(201, {
     sessionId,
     roomName,
-    programmeTitle: course.title,
+    programmeTitle,
     teacherName: account.full_name,
     invitedCount: invitedStudents.length,
   });
@@ -1628,25 +1907,35 @@ async function joinInstantSession(
   if (session.ended_at) return services.jsonResponse(410, { error: "This class has ended." });
 
   let enrolled = false;
+  let invited = false;
   if (account.role === "learner") {
-    const enrollment = await services.pool.query(
-      `SELECT 1 FROM tgf_enrollments
-       WHERE user_id = $1 AND programme_id = $2 AND approval_status = 'approved'`,
-      [account.id, session.programme_id],
+    const access = await services.pool.query<{ enrolled: boolean; invited: boolean }>(
+      `SELECT
+         EXISTS (
+           SELECT 1 FROM tgf_enrollments
+           WHERE user_id = $1 AND programme_id = $2 AND approval_status = 'approved'
+         ) AS enrolled,
+         EXISTS (
+           SELECT 1 FROM tgf_live_session_invites
+           WHERE session_id = $3 AND user_id = $1
+         ) AS invited`,
+      [account.id, session.programme_id, sessionId],
     );
-    enrolled = Boolean(enrollment.rowCount);
+    enrolled = Boolean(access.rows[0]?.enrolled);
+    invited = Boolean(access.rows[0]?.invited);
   }
   const authorization = authorizeLiveSessionJoin({
     role: account.role,
     userId: account.id,
     teacherId: session.teacher_id,
     enrolled,
+    invited,
   });
   if (!authorization.allowed ||
       (authorization.role !== "teacher" && authorization.role !== "learner" &&
        authorization.role !== "administrator")) {
     const message = account.role === "learner"
-      ? "You must be enrolled in this course to join."
+      ? "You must be invited to this class and enrolled in the course to join."
       : account.role === "teacher"
         ? "Only the assigned tutor can join this class."
         : "Student, tutor, or administrator access is required.";
@@ -2809,8 +3098,19 @@ export async function handleCollaborationRequest(
     if (pathname === "/api/collaboration/preferences") {
       return await updateDashboardPreferences(request, account, services);
     }
+    if (pathname === "/api/collaboration/live-sessions" && request.method === "GET") {
+      return await listLiveSessions(account, services);
+    }
     if (pathname === "/api/collaboration/live-sessions" && request.method === "POST") {
       return await createInstantSession(request, account, services);
+    }
+    if (pathname === "/api/collaboration/live-groups" && request.method === "GET") {
+      const programmeId = new URL(request.url).searchParams.get("programmeId") || "";
+      if (!isUuid(programmeId)) return services.jsonResponse(400, { error: "Choose an assigned course." });
+      return await listTeacherLiveGroups(programmeId, account, services);
+    }
+    if (pathname === "/api/collaboration/live-groups" && request.method === "POST") {
+      return await saveTeacherLiveGroup(request, account, services);
     }
     if (segments.length === 5 &&
         segments.slice(0, 3).join("/") === "api/collaboration/live-sessions" &&

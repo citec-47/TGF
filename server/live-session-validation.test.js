@@ -40,6 +40,16 @@ test("denies a learner who is not enrolled and only allows the assigned teacher 
   }).allowed, true);
 });
 
+test("denies enrolled learners who were not invited to an instant live class", () => {
+  assert.deepEqual(authorizeLiveSessionJoin({
+    role: "learner",
+    userId: "learner-id",
+    teacherId: "teacher-id",
+    enrolled: true,
+    invited: false,
+  }), { allowed: false, role: null, status: 403 });
+});
+
 test("learner grants do not allow publishing until the teacher changes permissions", () => {
   assert.equal(canInitiallyPublish("learner"), false);
   assert.equal(canInitiallyPublish("teacher"), true);

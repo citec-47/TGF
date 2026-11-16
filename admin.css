@@ -6102,8 +6102,67 @@ body.classroom-page {
   white-space: nowrap;
 }
 
+.live-class-join:disabled {
+  border-color: var(--admin-border);
+  background: var(--admin-surface-alt);
+  color: var(--admin-ink-soft);
+  cursor: not-allowed;
+  transform: none;
+}
+
 .live-class-join[hidden] {
   display: none;
+}
+
+.collaboration-schedule-card.live-session-card {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.live-group-members {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr));
+  gap: 8px;
+  max-height: 260px;
+  overflow: auto;
+  border: 1px solid var(--admin-border);
+  border-radius: 10px;
+  padding: 10px;
+  background: var(--admin-surface-alt);
+}
+
+.live-group-member {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  min-width: 0;
+  border: 1px solid var(--admin-border);
+  border-radius: 8px;
+  padding: 10px;
+  background: var(--admin-surface);
+  cursor: pointer;
+}
+
+.live-group-member input[type="checkbox"] {
+  flex: 0 0 auto;
+  margin: 3px 0 0;
+  accent-color: var(--admin-accent);
+}
+
+.live-group-member-copy {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.live-group-member-copy strong {
+  color: var(--admin-ink);
+  font-size: 0.84rem;
+}
+
+.live-group-member-copy small {
+  color: var(--admin-ink-soft);
+  font-size: 0.74rem;
 }
 
 .collaboration-weekday-summary {
