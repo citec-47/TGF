@@ -2,8 +2,6 @@ import Script from "next/script";
 
 import { loadPageBody } from "./lib/static-page";
 
-export const dynamic = "force-dynamic";
-
 export default async function HomePage() {
   const body = await loadPageBody("corporate.html", "TGF Group corporate homepage HTML");
 

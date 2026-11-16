@@ -9,8 +9,6 @@ export const metadata: Metadata = {
     "Explore TGF Vocational Pathways programmes, training locations and admissions information.",
 };
 
-export const dynamic = "force-dynamic";
-
 export default async function TGFVocationalPathwaysPage() {
   const body = await loadPageBody("index.html", "TGF Vocational Pathways page");
 
