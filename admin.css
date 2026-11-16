@@ -5644,7 +5644,7 @@ body.classroom-page {
   }
 }
 
-.collaboration-notification-center,
+.collaboration-notification-panel,
 .collaboration-schedule-card,
 .collaboration-recording-card,
 .collaboration-chat-panel,
@@ -5655,8 +5655,87 @@ body.classroom-page {
 }
 
 .collaboration-notification-center {
-  margin-bottom: 24px;
-  padding: 18px;
+  position: relative;
+  margin-bottom: 12px;
+}
+
+.collaboration-notification-trigger {
+  position: relative;
+  display: flex;
+  width: 100%;
+  min-height: 44px;
+  align-items: center;
+  gap: 10px;
+  border: 1px solid var(--admin-border);
+  border-radius: 10px;
+  padding: 9px 12px;
+  background: var(--admin-surface-alt);
+  color: var(--admin-ink);
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.9rem;
+  font-weight: 600;
+  text-align: left;
+}
+
+.collaboration-notification-trigger:hover,
+.collaboration-notification-trigger:focus-visible {
+  border-color: var(--admin-accent);
+  outline: none;
+}
+
+.collaboration-notification-trigger:focus-visible {
+  box-shadow: 0 0 0 3px rgb(244 125 32 / 18%);
+}
+
+.collaboration-notification-trigger svg {
+  width: 19px;
+  height: 19px;
+  flex: 0 0 19px;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.7;
+}
+
+.collaboration-notification-count {
+  position: absolute;
+  top: -7px;
+  right: -7px;
+  display: inline-grid;
+  min-width: 20px;
+  height: 20px;
+  place-items: center;
+  border: 2px solid var(--admin-surface);
+  border-radius: 999px;
+  padding: 0 5px;
+  background: var(--admin-accent);
+  color: #fff;
+  font-size: 0.68rem;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.collaboration-notification-count[hidden] {
+  display: none;
+}
+
+.collaboration-notification-panel {
+  position: absolute;
+  z-index: 20;
+  top: calc(100% + 8px);
+  left: 0;
+  width: min(360px, calc(100vw - 48px));
+  max-height: min(65vh, 500px);
+  overflow: auto;
+  border-radius: 12px;
+  padding: 14px;
+  box-shadow: 0 14px 36px rgb(20 18 14 / 18%);
+}
+
+.collaboration-notification-panel[hidden] {
+  display: none;
 }
 
 .collaboration-notification-heading,
@@ -5677,14 +5756,6 @@ body.classroom-page {
 .collaboration-message-meta strong,
 .collaboration-message-meta time {
   margin: 0;
-}
-
-.collaboration-notification-count {
-  border-radius: 999px;
-  padding: 2px 10px;
-  background: var(--admin-accent);
-  color: #fff;
-  font-weight: 700;
 }
 
 .collaboration-notification-list,
@@ -5712,6 +5783,10 @@ body.classroom-page {
 .collaboration-notification time {
   display: block;
   margin: 4px 0;
+}
+
+.teacher-next-class-overview {
+  margin: 20px 0;
 }
 
 .collaboration-chat-layout {
@@ -6133,6 +6208,15 @@ body.classroom-page {
 }
 
 @media (max-width: 760px) {
+  .collaboration-notification-panel {
+    width: min(360px, calc(100vw - 56px));
+  }
+
+  .student-sidebar .collaboration-notification-panel {
+    top: auto;
+    bottom: calc(100% + 8px);
+  }
+
   .collaboration-chat-layout {
     grid-template-columns: 1fr;
   }

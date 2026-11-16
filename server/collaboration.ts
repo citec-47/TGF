@@ -2648,7 +2648,8 @@ async function listNotifications(
     `SELECT id, notification_type, title, body, data, created_at, read_at,
             COUNT(*) FILTER (WHERE read_at IS NULL) OVER ()::text AS unread_count
      FROM tgf_notifications
-     WHERE user_id = $1 OR (target_role = 'administrator' AND $2 = 'administrator')
+     WHERE read_at IS NULL
+       AND (user_id = $1 OR (target_role = 'administrator' AND $2 = 'administrator'))
      ORDER BY created_at DESC
      LIMIT 50`,
     [userId, account.role],
@@ -2667,7 +2668,7 @@ async function listNotifications(
   });
 }
 
-async function markNotificationRead(
+async function deleteNotification(
   notificationId: string,
   account: CollaborationAccount,
   services: CollaborationServices,
@@ -2675,8 +2676,7 @@ async function markNotificationRead(
   if (!isUuid(notificationId)) return services.jsonResponse(404, { error: "This notification was not found." });
   const userId = account.role === "administrator" ? null : account.id;
   const result = await services.pool.query(
-    `UPDATE tgf_notifications
-     SET read_at = COALESCE(read_at, NOW())
+    `DELETE FROM tgf_notifications
      WHERE id = $1 AND (
        user_id = $2 OR (target_role = 'administrator' AND $3 = 'administrator')
      )
@@ -2684,7 +2684,7 @@ async function markNotificationRead(
     [notificationId, userId, account.role],
   );
   if (!result.rowCount) return services.jsonResponse(404, { error: "This notification was not found." });
-  return services.jsonResponse(200, { read: true });
+  return services.jsonResponse(200, { deleted: true });
 }
 
 async function updateDashboardPreferences(
@@ -2820,7 +2820,7 @@ export async function handleCollaborationRequest(
     if (segments.length === 5 &&
         segments.slice(0, 3).join("/") === "api/collaboration/notifications" &&
         segments[4] === "read" && request.method === "POST") {
-      return await markNotificationRead(segments[3], account, services);
+      return await deleteNotification(segments[3], account, services);
     }
     if (segments.length === 5 &&
         segments.slice(0, 3).join("/") === "api/collaboration/sessions" &&

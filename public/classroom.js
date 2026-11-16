@@ -1935,6 +1935,49 @@ function stopStudentPresence() {
   }
 }
 
+function getUpcomingTeacherClasses(classes) {
+  const now = Date.now();
+  return classes
+    .filter((liveClass) => {
+      const startsAt = Date.parse(liveClass.startsAt);
+      return Number.isFinite(startsAt) && startsAt > now && liveClass.approvalStatus !== "rejected";
+    })
+    .sort((first, second) => Date.parse(first.startsAt) - Date.parse(second.startsAt));
+}
+
+function renderTeacherNextClass(liveClass) {
+  const target = document.querySelector("#teacher-next-class");
+  if (!target) return;
+  target.replaceChildren();
+  if (!liveClass) {
+    target.append(node("p", "admin-empty", "No upcoming class is scheduled yet."));
+    return;
+  }
+
+  const details = node("div");
+  const when = new Intl.DateTimeFormat("en-CM", {
+    dateStyle: "medium",
+    timeStyle: "short",
+  }).format(new Date(liveClass.startsAt));
+  details.append(
+    node("span", liveClass.approvalStatus === "approved" ? "visibility-badge" : "visibility-badge is-hidden",
+      liveClass.approvalStatus === "approved" ? "Approved" : "Pending approval"),
+    node("h3", "", liveClass.title),
+    node("p", "", `${liveClass.programmeTitle} · ${liveClass.moduleTitle} · ${when}`),
+    node("p", "admin-location-subtitle", liveClass.deliveryMode === "location"
+      ? `TGFVP location · ${liveClass.locationName || "Location unavailable"}`
+      : liveClass.deliveryMode === "venue"
+        ? `Other venue · ${liveClass.venue}`
+        : "Online class"),
+  );
+  const card = node("article", "live-class-card");
+  card.append(details);
+  if (liveClass.approvalStatus === "approved" && liveClass.deliveryMode === "online") {
+    card.append(createButton("Open class", () => void openTeacherClass(liveClass), "button button-orange"));
+  }
+  target.append(card);
+}
+
 async function loadTeacherStudio() {
   showMessage(document.querySelector("#teacher-class-message"), "Loading your teaching studio…");
   try {
@@ -1958,7 +2001,9 @@ async function loadTeacherStudio() {
       courseWorkflowRequest,
     ]);
     const [assignedProgrammes, courseSubmissions, capstones, dailyAnswers] = courseWorkflow;
-    document.querySelector("#teacher-class-count").textContent = String(classes.length);
+    const upcomingClasses = getUpcomingTeacherClasses(classes);
+    document.querySelector("#teacher-class-count").textContent = String(upcomingClasses.length);
+    renderTeacherNextClass(upcomingClasses[0]);
     document.querySelector("#teacher-module-count").textContent = String(modules.length);
     document.querySelector("#teacher-material-count").textContent = String(materials.length);
     teacherLocations = locations;

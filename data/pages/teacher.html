@@ -118,15 +118,16 @@
                 <p class="admin-intro">Your classes, course materials and tutor profile, all in one place.</p>
               </div>
               <div class="teacher-welcome-actions">
+                <a class="button button-orange" href="#teacher-go-live">Go live now <span aria-hidden="true">↗</span></a>
                 <a class="button button-orange" href="#teacher-classes">Schedule a class <span aria-hidden="true">↗</span></a>
                 <a class="button button-dark" href="/admin" id="teacher-admin-link" hidden>Manage courses <span aria-hidden="true">↗</span></a>
               </div>
             </header>
 
             <section class="student-quick-access" aria-label="Teacher quick access" data-teacher-dashboard-view="teacher-overview">
-              <a class="student-quick-card" href="#teacher-recordings">
+              <a class="student-quick-card" href="#teacher-go-live">
                 <svg class="student-quick-icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2" /><path d="m10 9 5 3-5 3z" /></svg>
-                <span class="student-quick-copy"><strong>Go live</strong><small>Start a class or open recordings</small></span>
+                <span class="student-quick-copy"><strong>Go live</strong><small>Invite your students to a live class</small></span>
                 <span class="student-quick-arrow" aria-hidden="true">↗</span>
               </a>
               <a class="student-quick-card" href="#teacher-modules">
@@ -148,6 +149,12 @@
                 <div class="student-stat"><span>Programme modules</span><strong id="teacher-module-count">—</strong></div>
                 <div class="student-stat"><span>Materials submitted</span><strong id="teacher-material-count">—</strong></div>
               </div>
+              <div class="teacher-next-class-overview">
+                <h3>Next scheduled class</h3>
+                <div class="collaboration-schedule-list" id="teacher-next-class" aria-live="polite">
+                  <p class="admin-empty">Loading your next class…</p>
+                </div>
+              </div>
               <div class="collaboration-schedule-list" data-collab-live-overview aria-live="polite"></div>
             </section>
 
@@ -157,6 +164,14 @@
                 <span class="student-section-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2" /><path d="m10 9 5 3-5 3z" /></svg></span>
               </div>
               <p class="admin-message" id="teacher-class-message" role="status" aria-live="polite"></p>
+              <form class="admin-form teacher-class-form teacher-go-live-form" id="teacher-go-live" data-collab-go-live>
+                <h3>Go live now</h3>
+                <p class="admin-intro">Choose one of your assigned courses. Approved enrolled students will receive an invitation, and recording starts automatically when you enter the room.</p>
+                <label for="teacher-go-live-course">Course</label>
+                <select id="teacher-go-live-course" data-go-live-course required></select>
+                <p class="admin-message" data-go-live-status role="status" aria-live="polite"></p>
+                <button class="button button-orange" data-go-live-submit type="submit">Start live class</button>
+              </form>
               <div class="live-class-list" id="teacher-class-list"></div>
               <form class="admin-form teacher-class-form" id="teacher-class-form">
                 <h3 id="teacher-class-form-heading">Schedule a live class</h3>
@@ -210,14 +225,6 @@
               <p class="admin-intro">Recordings of classes you have taught will appear here when processing is complete.</p>
               <h3>Upcoming classes</h3>
               <div class="collaboration-schedule-list" data-collab-live-classes aria-live="polite"></div>
-              <form class="admin-form teacher-class-form teacher-go-live-form" data-collab-go-live>
-                <h3>Go live now</h3>
-                <p class="admin-intro">Choose one of your assigned courses. Approved enrolled students will receive an invitation, and recording starts automatically when you enter the room.</p>
-                <label for="teacher-go-live-course">Course</label>
-                <select id="teacher-go-live-course" data-go-live-course required></select>
-                <p class="admin-message" data-go-live-status role="status" aria-live="polite"></p>
-                <button class="button button-orange" data-go-live-submit type="submit">Start live class</button>
-              </form>
               <h3>Recordings</h3>
               <div class="collaboration-recording-list" data-collab-recordings aria-live="polite"></div>
             </section>

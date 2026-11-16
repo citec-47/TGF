@@ -12,6 +12,7 @@
   const MAX_CHAT_FILES = 5;
   const MAX_CHAT_FILE_BYTES = 25 * 1024 * 1024;
   const MAX_CHAT_TOTAL_BYTES = 100 * 1024 * 1024;
+  let notificationLoadRevision = 0;
   const state = {
     account: null,
     stream: null,
@@ -1021,28 +1022,52 @@
   function notificationContainer() {
     let container = document.querySelector("[data-collab-notification-center]");
     if (container) return container;
-    const dashboard = document.querySelector("#student-dashboard .student-dashboard-content, #teacher-dashboard .student-dashboard-content, #dashboard-panel .admin-dashboard-content");
-    if (!dashboard) return null;
+    const sidebar = document.querySelector(
+      "#student-dashboard .student-sidebar, #teacher-dashboard .student-sidebar, #dashboard-panel .admin-sidebar",
+    );
+    if (!sidebar) return null;
     container = element("section", "collaboration-notification-center");
     container.dataset.collabNotificationCenter = "";
-    const header = element("div", "collaboration-notification-heading");
-    header.append(
-      element("div", "", ""),
-      makeButton("Notifications", () => void loadNotifications(), "small-action"),
-    );
-    header.firstElementChild.append(
-      element("p", "micro-label", "Updates"),
-      element("h2", "", "Notifications"),
-    );
     const count = element("span", "collaboration-notification-count", "0");
     count.dataset.collabNotificationCount = "";
-    header.append(count);
+    count.hidden = true;
+    const trigger = element("button", "collaboration-notification-trigger");
+    trigger.type = "button";
+    trigger.setAttribute("aria-expanded", "false");
+    trigger.setAttribute("aria-controls", "collaboration-notification-panel");
+    trigger.setAttribute("aria-label", "Notifications");
+    trigger.dataset.collabNotificationTrigger = "";
+    const icon = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    icon.setAttribute("viewBox", "0 0 24 24");
+    icon.setAttribute("aria-hidden", "true");
+    const bell = document.createElementNS("http://www.w3.org/2000/svg", "path");
+    bell.setAttribute("d", "M18 9a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9m-8 12a2 2 0 0 0 4 0");
+    icon.append(bell);
+    trigger.append(icon, element("span", "", "Notifications"), count);
+    const panel = element("div", "collaboration-notification-panel");
+    panel.id = "collaboration-notification-panel";
+    panel.hidden = true;
+    const header = element("div", "collaboration-notification-heading");
+    header.append(
+      element("h2", "", "Notifications"),
+      makeButton("Close", () => {
+        panel.hidden = true;
+        trigger.setAttribute("aria-expanded", "false");
+      }, "small-action"),
+    );
     const liveStatus = element("p", "admin-field-hint");
     liveStatus.dataset.collabLiveStatus = "";
     const list = element("div", "collaboration-notification-list");
     list.dataset.collabNotificationList = "";
-    container.append(header, liveStatus, list);
-    dashboard.prepend(container);
+    panel.append(header, liveStatus, list);
+    trigger.addEventListener("click", () => {
+      const opening = panel.hidden;
+      panel.hidden = !opening;
+      trigger.setAttribute("aria-expanded", String(opening));
+      if (opening) void loadNotifications();
+    });
+    container.append(trigger, panel);
+    sidebar.prepend(container);
     return container;
   }
 
@@ -1050,15 +1075,22 @@
     const container = notificationContainer();
     if (!container) return;
     const list = container.querySelector("[data-collab-notification-list]");
+    const requestRevision = ++notificationLoadRevision;
     try {
       const result = await request("/api/collaboration/notifications");
+      if (requestRevision !== notificationLoadRevision) return;
       const count = container.querySelector("[data-collab-notification-count]");
-      count.textContent = String(result.unreadCount);
-      count.hidden = !result.unreadCount;
+      const unreadCount = Number(result.unreadCount) || 0;
+      count.textContent = unreadCount > 99 ? "99+" : String(unreadCount);
+      count.hidden = unreadCount === 0;
+      container.querySelector("[data-collab-notification-trigger]").setAttribute(
+        "aria-label",
+        unreadCount ? `Notifications, ${unreadCount} unread` : "Notifications",
+      );
       list.replaceChildren();
       if (!result.notifications.length) setEmpty(list, "You are up to date.");
       for (const notification of result.notifications) {
-        const card = element("article", notification.readAt ? "collaboration-notification" : "collaboration-notification is-unread");
+        const card = element("article", "collaboration-notification is-unread");
         card.append(
           element("strong", "", notification.title),
           element("p", "", notification.body),
@@ -1072,19 +1104,19 @@
           join.href = `/live-class?sessionId=${encodeURIComponent(liveSessionId)}`;
           card.append(join);
         }
-        if (!notification.readAt) {
-          card.append(makeButton("Mark read", async () => {
-            try {
-              await request(`/api/collaboration/notifications/${encodeURIComponent(notification.id)}/read`, {
-                method: "POST",
-                body: JSON.stringify({}),
-              });
-              await loadNotifications();
-            } catch (error) {
-              card.append(element("p", "admin-message is-error", error.message));
-            }
-          }));
-        }
+        card.append(makeButton("Mark read", async () => {
+          try {
+            await request(`/api/collaboration/notifications/${encodeURIComponent(notification.id)}/read`, {
+              method: "POST",
+              body: JSON.stringify({}),
+            });
+            notificationLoadRevision += 1;
+            card.remove();
+            await loadNotifications();
+          } catch (error) {
+            card.append(element("p", "admin-message is-error", error.message));
+          }
+        }, "small-action"));
         list.append(card);
       }
     } catch (error) {
