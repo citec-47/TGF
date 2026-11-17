@@ -1,3 +1,10 @@
+.corp-header,
+.corp-site,
+.corp-footer {
+  --orange: #f47d20;
+  --orange-deep: #b64a0b;
+}
+
 .corp-topline {
   background: #090b09;
   letter-spacing: 0.06em;
