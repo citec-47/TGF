@@ -7,6 +7,16 @@
   min-height: 76px;
 }
 
+.corp-header .corp-brand {
+  width: 194px;
+}
+
+.corp-brand-logo {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
 .corp-brand .brand-mark {
   letter-spacing: -0.11em;
 }
@@ -291,11 +301,32 @@
   background: var(--corp-paper);
 }
 
+.corp-about .corp-section-heading {
+  display: grid;
+  grid-template-columns: minmax(0, 0.85fr) minmax(0, 1.15fr);
+  align-items: start;
+  gap: clamp(36px, 6vw, 88px);
+  border-bottom: 1px solid var(--corp-line);
+  padding-bottom: 42px;
+}
+
+.corp-about .corp-lead {
+  max-width: 700px;
+  margin: 0;
+  color: #4b4d47;
+  font-size: clamp(16px, 1.25vw, 18px);
+  line-height: 1.8;
+}
+
 .corp-about-grid {
   display: grid;
   grid-template-columns: 1fr 0.85fr;
-  gap: 76px;
+  gap: clamp(36px, 6vw, 82px);
   align-items: start;
+}
+
+.corp-about-story > .corp-purpose-grid {
+  margin-top: 0;
 }
 
 .corp-about-story > p {
@@ -350,8 +381,10 @@
 
 .corp-values {
   border: 1px solid #e1ded5;
-  padding: 32px;
+  border-top: 3px solid var(--orange-deep);
+  padding: 34px;
   background: #fff;
+  box-shadow: 0 20px 50px rgb(23 26 22 / 5%);
 }
 
 .corp-values h3 {
@@ -361,6 +394,13 @@
   font-size: 25px;
   letter-spacing: -0.035em;
   line-height: 1.25;
+}
+
+.corp-values-intro {
+  margin: -8px 0 18px;
+  color: var(--corp-muted);
+  font-size: 12px;
+  line-height: 1.65;
 }
 
 .corp-values ol {
@@ -1278,6 +1318,14 @@
     max-width: 570px;
   }
 
+  .corp-about .corp-section-heading {
+    grid-template-columns: 1fr;
+  }
+
+  .corp-about .corp-lead {
+    max-width: 680px;
+  }
+
   .corp-about-grid,
   .corp-community-grid {
     grid-template-columns: 1fr;
@@ -1330,6 +1378,10 @@
 
   .corp-header .header-inner {
     min-height: 68px;
+  }
+
+  .corp-header .corp-brand {
+    width: clamp(142px, 42vw, 176px);
   }
 
   .corp-header .brand-caption {

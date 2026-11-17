@@ -20,16 +20,16 @@ export const DEFAULT_CORPORATE_CONTENT = {
   heroIntro: "Founded in 2018, TGF Group brings together its businesses and social-impact programmes under the watchword “Base For Better Living.”",
   foundedDate: "Founded June 17, 2018",
   about: {
-    intro: "Transgenerational Forces Group is committed to creating solutions that improve everyday life and build a lasting impact across generations. Alongside its subsidiaries, the Group’s Corporate Social Responsibility recognises, empowers and supports young dreams.",
+    intro: "Transgenerational Forces (TGF) is a forward-looking group of companies committed to creating solutions that improve everyday life and make a lasting difference across generations. Founded on resilience, innovation and a passion for transformation, TGF has grown from humble beginnings into a dynamic group with diverse operations. Since its founding on 17 June 2018, TGF has remained steadfast in its mission to empower people, shape industries and leave an enduring legacy. Guided by its watchword, “Base For Better Living,” the Group develops initiatives and enterprises that create value today and inspire future generations. Through its subsidiaries and Corporate Social Responsibility initiatives, TGF recognises, empowers and supports young people as they pursue their ambitions.",
     vision: "Create value today while inspiring generations to come.",
     mission: "Empower people, shape industries, and leave an enduring legacy.",
     objectives: [],
     values: [
-      { name: "Service", description: "The essence of leadership is service. TGF values servant-hearted leadership." },
-      { name: "Giving", description: "Give time, resources and effort to fulfill the mission and advance others." },
-      { name: "Loyalty", description: "Unity and commitment protect the dignity and integrity of the company." },
-      { name: "Discipline & Punctuality", description: "Discipline and punctuality reflect respect, professionalism and integrity." },
-      { name: "Resilience", description: "Resilience keeps the vision alive through challenge and change." },
+      { name: "Service", description: "We believe leadership is defined not by title but by service. Inspired by Matthew 23:11–12—“The greatest among you shall be your servant”—we lead with humility and a willingness to work for the good of others." },
+      { name: "Giving", description: "Giving is a way of life and an expression of love and commitment to our vision. We contribute our time, resources and effort to advance the Group’s mission and help others succeed." },
+      { name: "Loyalty", description: "Loyalty is demonstrated through unity and commitment to upholding the dignity and integrity of the Group. We value every member and treat each person with respect, regardless of age, background or race." },
+      { name: "Discipline & Punctuality", description: "Excellence requires discipline. We treat punctuality as a mark of respect, professionalism and integrity, and hold ourselves accountable for consistent, dependable work." },
+      { name: "Resilience", description: "Resilience keeps the vision moving forward. We persevere through difficulty, adapt to change and see our work through to completion." },
     ],
   },
   subsidiaries: [
