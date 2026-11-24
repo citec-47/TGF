@@ -25,6 +25,90 @@ const isStudentPage = Boolean(studentDashboard);
 const isTeacherPage = Boolean(teacherDashboard);
 const studentNavigationLinks = [...document.querySelectorAll("#student-dashboard .student-sidebar nav a")];
 const teacherNavigationLinks = [...document.querySelectorAll("#teacher-dashboard .student-sidebar nav a")];
+try {
+  const dashboardTheme = window.localStorage.getItem("tgf-dashboard-theme");
+  if (dashboardTheme === "dark" || dashboardTheme === "light") {
+    document.querySelector(".classroom-page")?.classList.toggle("is-dark", dashboardTheme === "dark");
+    document.body.classList.toggle("is-dark", dashboardTheme === "dark");
+    document.documentElement.style.colorScheme = dashboardTheme;
+  }
+} catch {
+  // Server preference is loaded after the account session is available.
+}
+
+function applyDirectDashboardTheme(theme) {
+  if (!["light", "dark"].includes(theme)) return;
+  const page = document.querySelector(".classroom-page");
+  const toggle = document.querySelector("#dashboard-theme-toggle");
+  if (!page || !toggle) return;
+  const isDark = theme === "dark";
+  page.classList.toggle("is-dark", isDark);
+  document.body.classList.toggle("is-dark", isDark);
+  document.documentElement.style.colorScheme = theme;
+  toggle.hidden = false;
+  toggle.disabled = false;
+  toggle.setAttribute("aria-pressed", String(isDark));
+  toggle.setAttribute("aria-label", `Switch to ${isDark ? "light" : "dark"} mode`);
+  toggle.title = `Switch to ${isDark ? "light" : "dark"} mode`;
+  try {
+    window.localStorage.setItem("tgf-dashboard-theme", theme);
+  } catch {
+    // The server preference remains available as the fallback.
+  }
+}
+
+async function loadDirectDashboardTheme() {
+  const toggle = document.querySelector("#dashboard-theme-toggle");
+  if (!toggle) return;
+  toggle.hidden = false;
+  try {
+    const saved = await requestJson("/api/collaboration/preferences");
+    applyDirectDashboardTheme(saved.theme || "light");
+  } catch {
+    const saved = window.localStorage.getItem("tgf-dashboard-theme");
+    applyDirectDashboardTheme(saved === "dark" ? "dark" : "light");
+  }
+}
+
+function initializeDirectDashboardTheme() {
+  const toggle = document.querySelector("#dashboard-theme-toggle");
+  if (!toggle || toggle.dataset.directInitialized === "true") return;
+  toggle.dataset.directInitialized = "true";
+  toggle.hidden = false;
+  let saved = "light";
+  try {
+    saved = window.localStorage.getItem("tgf-dashboard-theme") || "light";
+  } catch {
+    saved = "light";
+  }
+  applyDirectDashboardTheme(saved === "dark" ? "dark" : "light");
+  toggle.addEventListener("click", async () => {
+    const page = document.querySelector(".classroom-page");
+    if (!page) return;
+    const current = page.classList.contains("is-dark") ? "dark" : "light";
+    const next = current === "dark" ? "light" : "dark";
+    toggle.disabled = true;
+    applyDirectDashboardTheme(next);
+    try {
+      const result = await requestJson("/api/collaboration/preferences", {
+        method: "PUT",
+        body: JSON.stringify({ theme: next }),
+      });
+      applyDirectDashboardTheme(result.theme || next);
+    } catch {
+      const status = document.querySelector("[data-user-theme-status]");
+      if (status) {
+        status.textContent = "Theme applied on this browser, but could not sync with your account.";
+        status.classList.add("is-error");
+      }
+    } finally {
+      toggle.disabled = false;
+    }
+  });
+  void loadDirectDashboardTheme();
+}
+
+initializeDirectDashboardTheme();
 let activeStudentLiveClassId;
 let studentPresenceTimer;
 let studentPaymentStatusSnapshot = "";
@@ -404,7 +488,13 @@ async function loadStudentCourses(programmesSnapshot) {
     const liveClasses = approvedProgrammes.flatMap((programme) => programme.liveClasses || []);
     document.querySelector("#student-active-count").textContent = String(approvedProgrammes.length);
     document.querySelector("#student-completed-count").textContent = String(allModules.filter((module) => module.completed).length);
-    document.querySelector("#student-live-count").textContent = String(liveClasses.length);
+    const liveCount = document.querySelector("#student-live-count");
+    liveCount.dataset.courseLiveCount = String(liveClasses.length);
+    liveCount.textContent = String(
+      liveClasses.length +
+      Number(liveCount.dataset.timetableLiveCount || 0) +
+      Number(liveCount.dataset.invitationLiveCount || 0),
+    );
 
     for (const programme of approvedProgrammes) {
       const card = node("article", "student-pathway-card");
@@ -2135,7 +2225,27 @@ function renderTeacherCourseSubmissions(submissions) {
     if (submission.adminFeedback) details.append(node("p", "admin-location-subtitle", submission.adminFeedback));
     if (submission.generationError) details.append(node("p", "admin-message is-error", submission.generationError));
     card.append(details);
+    if (submission.contentType?.startsWith("video/")) {
+      card.append(createButton("Delete video", () => void deleteTeacherCourseSubmission(submission), "small-action small-action-danger"));
+    }
     list.append(card);
+  }
+}
+
+async function deleteTeacherCourseSubmission(submission) {
+  const message = document.querySelector("#teacher-course-submission-message");
+  if (!window.confirm(
+    `Delete the uploaded video "${submission.title}"?${submission.reviewStatus === "approved" ? " Its approved course lessons will remain available." : ""}`,
+  )) return;
+  try {
+    await requestJson("/api/teacher/course-submissions", {
+      method: "DELETE",
+      body: JSON.stringify({ id: submission.id }),
+    });
+    await loadTeacherStudio();
+    showMessage(message, "Uploaded video deleted.");
+  } catch (error) {
+    showMessage(message, error.message, true);
   }
 }
 
@@ -2372,28 +2482,135 @@ async function submitTeacherCourseContent(event) {
   if (!form.reportValidity()) return;
   const file = form.elements.file.files?.[0];
   if (!file) return;
-  if (file.size > 10 * 1024 * 1024) {
+  const videoFormat = /\.(mp4|mov|webm)$/i.exec(file.name)?.[1]?.toLowerCase();
+  const isVideo = Boolean(videoFormat);
+  const maxBytes = isVideo ? 100 * 1024 * 1024 : 10 * 1024 * 1024;
+  if (file.size > maxBytes) {
     showMessage(document.querySelector("#teacher-course-submission-message"),
-      "Files must be smaller than 10 MB.", true);
+      isVideo ? "Videos must be 100 MB or smaller." : "Documents must be 10 MB or smaller.", true);
     return;
   }
   const button = form.querySelector('button[type="submit"]');
-  const data = new FormData();
-  data.set("title", form.elements.title.value);
-  data.set("file", file);
   button.disabled = true;
-  showMessage(document.querySelector("#teacher-course-submission-message"), "Uploading private course content…");
+  const message = document.querySelector("#teacher-course-submission-message");
+  let uploadPublicId = "";
   try {
-    await requestJson("/api/teacher/course-submissions", { method: "POST", body: data });
+    if (isVideo) {
+      const durationSeconds = await readCourseVideoDuration(file);
+      const signature = await requestJson("/api/teacher/course-submissions/upload-signature", {
+        method: "POST",
+        body: JSON.stringify({ format: videoFormat }),
+      });
+      uploadPublicId = signature.publicId;
+      await uploadCourseVideoToCloudinary(file, signature, (percent) => {
+        showMessage(message, `Uploading video directly to secure storage… ${percent}%`);
+      });
+      await requestJson("/api/teacher/course-submissions/upload", {
+        method: "POST",
+        body: JSON.stringify({
+          title: form.elements.title.value,
+          originalFilename: file.name,
+          fileSize: file.size,
+          durationSeconds,
+          publicId: signature.publicId,
+          format: videoFormat,
+        }),
+      });
+      uploadPublicId = "";
+    } else {
+      if (file.size > 10 * 1024 * 1024) {
+        throw new Error("Documents must be 10 MB or smaller.");
+      }
+      const data = new FormData();
+      data.set("title", form.elements.title.value);
+      data.set("file", file);
+      showMessage(message, "Uploading private course content…");
+      await requestJson("/api/teacher/course-submissions", { method: "POST", body: data });
+    }
     form.reset();
     await loadTeacherStudio();
     showMessage(document.querySelector("#teacher-course-submission-message"),
       "Submitted · Pending admin review. Modules and weekly blocks will appear here only after approval.");
   } catch (error) {
-    showMessage(document.querySelector("#teacher-course-submission-message"), error.message, true);
+    if (uploadPublicId) {
+      try {
+        await requestJson("/api/teacher/course-submissions/upload", {
+          method: "DELETE",
+          body: JSON.stringify({ publicId: uploadPublicId }),
+        });
+      } catch {
+        showMessage(message, `${error.message} The upload status is uncertain; refresh your submissions before trying again.`, true);
+        return;
+      }
+    }
+    showMessage(message, error.message, true);
   } finally {
     button.disabled = false;
   }
+}
+
+function readCourseVideoDuration(file) {
+  return new Promise((resolve, reject) => {
+    const objectUrl = URL.createObjectURL(file);
+    const video = document.createElement("video");
+    const finish = (error, duration) => {
+      URL.revokeObjectURL(objectUrl);
+      video.removeAttribute("src");
+      if (error) reject(error);
+      else resolve(duration);
+    };
+    video.preload = "metadata";
+    video.onloadedmetadata = () => {
+      const duration = Math.ceil(video.duration);
+      if (!Number.isFinite(duration) || duration < 1 || duration > 86400) {
+        finish(new Error("Choose a video between 1 second and 24 hours long."));
+        return;
+      }
+      finish(null, duration);
+    };
+    video.onerror = () => finish(new Error("The video duration could not be read. Check the file and try again."));
+    video.src = objectUrl;
+  });
+}
+
+function uploadCourseVideoToCloudinary(file, signature, onProgress) {
+  return new Promise((resolve, reject) => {
+    const form = new FormData();
+    form.set("file", file);
+    form.set("api_key", signature.apiKey);
+    form.set("timestamp", String(signature.timestamp));
+    form.set("type", "authenticated");
+    form.set("public_id", signature.publicId);
+    form.set("signature", signature.signature);
+    const request = new XMLHttpRequest();
+    request.open(
+      "POST",
+      `https://api.cloudinary.com/v1_1/${encodeURIComponent(signature.cloudName)}/raw/upload`,
+    );
+    request.timeout = 10 * 60 * 1000;
+    request.upload.addEventListener("progress", (event) => {
+      if (event.lengthComputable) onProgress(Math.min(99, Math.round((event.loaded / event.total) * 100)));
+    });
+    request.addEventListener("load", () => {
+      let result;
+      try {
+        result = JSON.parse(request.responseText);
+      } catch {
+        reject(new Error("Secure storage returned an unreadable upload response."));
+        return;
+      }
+      if (request.status < 200 || request.status >= 300 || result.error) {
+        reject(new Error(result.error?.message || "The video could not be uploaded. Check your connection and try again."));
+        return;
+      }
+      onProgress(100);
+      resolve(result);
+    });
+    request.addEventListener("error", () => reject(new Error("The video upload failed. Check your connection and try again.")));
+    request.addEventListener("timeout", () => reject(new Error("The video upload timed out. Check your connection and try again.")));
+    request.addEventListener("abort", () => reject(new Error("The video upload was cancelled.")));
+    request.send(form);
+  });
 }
 
 async function submitTeacherMaterial(event) {

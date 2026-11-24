@@ -6,3 +6,6 @@ node_modules/
 out/
 *.tsbuildinfo
 npm-debug.log*
+.vercel
+.env*
+var/live-recordings/

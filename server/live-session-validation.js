@@ -26,5 +26,5 @@ export function authorizeLiveSessionJoin({ role, userId, teacherId, enrolled, in
 }
 
 export function canInitiallyPublish(role) {
-  return role === "teacher";
+  return role === "teacher" || role === "learner";
 }

@@ -1,9 +1,15 @@
 export const MAX_WEEK_CONTENT_CHARACTERS = 30000;
 
+export function recommendVideoModuleCount(durationSeconds) {
+  if (!Number.isInteger(durationSeconds) || durationSeconds < 1) return null;
+  return Math.min(8, Math.max(1, Math.ceil(durationSeconds / 3600)));
+}
+
 export function validateGeneratedCurriculum(value, expectedModuleCount) {
   if (!Number.isInteger(expectedModuleCount) || expectedModuleCount < 1 || expectedModuleCount > 8) {
     return { error: "Choose a course duration between 1 and 8 modules." };
   }
+
   if (!value || typeof value !== "object" || Array.isArray(value) ||
       !Array.isArray(value.modules) || value.modules.length !== expectedModuleCount) {
     return { error: `The generated draft must contain exactly ${expectedModuleCount} modules.` };

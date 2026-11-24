@@ -79,10 +79,17 @@ where available. If a recognized PDF or DOCX cannot yield readable text, it
 creates a clearly flagged page/day schedule for administrator verification
 instead of reporting a false content extraction success. Each module's capstone
 is placed at the end of Week 4. Drafts remain private until approved. This
-document-arrangement workflow does not use OpenAI. Teacher-submitted course
-curriculum drafts still use the OpenAI Responses API; configure
+document-arrangement workflow does not use OpenAI. Teacher-submitted PDF, DOC
+and DOCX curriculum drafts use the OpenAI Responses API; configure
 `OPENAI_API_KEY` in `.env` and optionally set `OPENAI_MODEL` (defaults to
-`gpt-4o-mini`) for that workflow. Other supplementary materials are assigned to
+`gpt-4o-mini`) for that workflow. Teacher-submitted MP4, MOV and WebM courses
+are analyzed as video with Gemini; configure `GEMINI_API_KEY` and optionally
+set `GEMINI_MODEL` (defaults to `gemini-2.5-flash`). Videos can be up to 100 MB,
+while documents remain limited to 10 MB. The admin receives the detected video
+duration and a one-module-per-hour recommendation, capped at eight modules;
+the module count can be changed before generating a draft. Video drafts retain
+the same four weeks per module, five study days per week and capstone review.
+Other supplementary materials are assigned to
 a module and weekly block by the administrator before approval. Teachers can
 expand each approved module to review its four-week, five-day outline and open
 the assigned source pages. Enrolled learners see the same daily outline within
@@ -91,21 +98,54 @@ page, a daily answer form for questions and activities, and the module
 capstone at the end of Week 4. Daily answers are submitted to the assigned
 teacher for approval or feedback; this review does not change module access.
 
-Live audio/video uses LiveKit. Configure `LIVEKIT_URL`, `LIVEKIT_API_KEY`, and
-`LIVEKIT_API_SECRET` in `.env`, then set the LiveKit webhook URL to
-`/api/collaboration/livekit/webhook` and subscribe to participant joined/left,
-room finished, and egress ended events. Recordings use LiveKit Egress with a
-private S3-compatible bucket as temporary storage; configure
-`LIVEKIT_RECORDING_S3_BUCKET`, `LIVEKIT_RECORDING_S3_REGION`,
-`LIVEKIT_RECORDING_S3_ACCESS_KEY`, and `LIVEKIT_RECORDING_S3_SECRET_KEY`.
-Set `LIVEKIT_RECORDING_S3_ENDPOINT` only for an S3-compatible provider that
-requires a custom endpoint. The app transfers finished videos into authenticated
-Cloudinary video storage and proxies playback after checking course enrollment.
+## Browser WebRTC live classes
 
-The deployment must allow long-running API responses for Server-Sent Events,
-LiveKit webhook handling, Egress, and Cloudinary transfers. PostgreSQL
-connections must permit `LISTEN`/`NOTIFY` for live message and notification
-updates. Voice recording requires microphone permission in a secure browser
-context. LiveKit Egress and a reachable private S3-compatible bucket are
-required for automatic recording; without them, live calls may work but
-recording will be marked failed.
+Live classes use Socket.IO for signaling and mediasoup for the SFU. LiveKit and
+other paid video providers are not used. Run `npm install`, copy `.env.example`
+to `.env`, set `DATABASE_URL` and `SESSION_SECRET`, then run `npm run dev`.
+The custom server starts Next.js, Socket.IO and mediasoup together on `PORT`
+(default 3000). Mediasoup is configured for 9–16 students by default and
+creates UDP/TCP WebRTC transports on `MEDIASOUP_MIN_PORT` through
+`MEDIASOUP_MAX_PORT`.
+
+Browser camera and microphone access requires HTTPS, except for `localhost`.
+Deploy behind a reverse proxy with WebSocket upgrade support and open the
+mediasoup UDP/TCP port range to the public internet. Set `MEDIASOUP_ANNOUNCED_IP`
+to the server's public IPv4 or DNS address. Configure STUN and coturn TURN:
+
+- STUN: set `STUN_URL=stun:stun.example.com:3478`.
+- TURN: set `TURN_URL=turn:turn.example.com:3478`, `TURN_USERNAME`, and
+  `TURN_CREDENTIAL`.
+- Free/open-source coturn setup on Ubuntu: install coturn, enable it in
+  `/etc/turnserver.conf`, set `listening-port=3478`, `fingerprint`,
+  `realm=<your-domain>`, and one-time or long-term credentials, open UDP/TCP
+  3478 and the configured TURN relay UDP range, and use `turns:<domain>:3478`
+  with TLS in production.
+
+SMTP can be configured with `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURE`,
+`SMTP_USER`, `SMTP_PASS`, `MAIL_FROM`, `ADMIN_EMAIL`, and `MAIL_BATCH_SIZE`.
+`RECORDING_PART_MINUTES` defaults to 15. Cloudinary credentials remain
+`CLOUDINARY_CLOUD_NAME`, `CLOUDINARY_API_KEY`, and `CLOUDINARY_API_SECRET`.
+
+Teachers start and end the class from the live-class page. Students start muted
+and can only unmute after the server verifies the teacher and updates the
+student tile. Camera, screen sharing, raised-hand and chat controls use the
+mediasoup/Socket.IO connection and the existing session cookie. The teacher's
+browser records automatically and sends five-second chunks to the server while
+the class is live. Unsent chunks are kept in IndexedDB and retried in order
+when connectivity returns; chunk numbers make server retries idempotent.
+Keep the live-class page open after ending a class if some chunks are still
+queued so the platform can finish uploading them and finalize the recording.
+
+### Manual live-class test checklist
+
+1. Sign in as a teacher and open an assigned class; verify the Start class button.
+2. Join in two other browsers or devices as enrolled students on different networks.
+3. Confirm each student joins muted and no tile shows speaking permission.
+4. Click one student tile to unmute it, then click again to mute it.
+5. Test Mute all and Unmute all.
+6. Select Share screen, verify the main view changes, then Stop sharing.
+7. Verify raised hands appear on student tiles.
+8. End the class and verify every participant sees the class-ended state.
+9. Temporarily disconnect the teacher's internet; verify chunks queue locally,
+   then reconnect and confirm they upload before the recording is finalized.

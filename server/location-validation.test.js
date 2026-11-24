@@ -370,6 +370,78 @@ test("validates teacher-submitted profile details within publication limits", ()
   }, "demo-cloud", "123").error);
 });
 
+
+
+test("validates programme payment plans against fee and ordered installment totals", () => {
+  const plan = {
+    totalFee: 250000,
+    paymentInstructions: "Pay using the account details provided by the office.",
+    installments: [
+      { label: "Registration fee", paymentCategory: "registration", amount: 50000, dueDaysAfterEnrollment: 0 },
+      { label: "Course balance", amount: 200000, dueDaysAfterEnrollment: 30 },
+    ],
+  };
+  assert.equal(validateProgrammePaymentPlan(plan, 50000).paymentPlan.installments.length, 2);
+  assert.ok(validateProgrammePaymentPlan(plan, 300000).error);
+  assert.ok(validateProgrammePaymentPlan({ ...plan, totalFee: 260000 }).error);
+  assert.ok(validateProgrammePaymentPlan({
+    ...plan,
+    installments: [{ label: "Course balance", amount: 250000, dueDaysAfterEnrollment: 0 }],
+  }, 50000).error);
+  assert.ok(validateProgrammePaymentPlan({
+    ...plan,
+    installments: [plan.installments[1], plan.installments[0]],
+  }).error);
+  assert.deepEqual(validateProgrammePaymentPlan({
+    totalFee: 0,
+    paymentInstructions: "",
+    installments: [],
+  }).paymentPlan.installments, []);
+});
+
+test("validates registration followed by three installments", () => {
+  const plan = validateProgrammePaymentPlan({
+    totalFee: 50000,
+    paymentInstructions: "",
+    installments: [
+      { label: "Registration fee", paymentCategory: "registration", amount: 5000, dueDaysAfterEnrollment: 0 },
+      { label: "First installment", paymentCategory: "installment", amount: 15000, dueDaysAfterEnrollment: 0 },
+      { label: "Second installment", paymentCategory: "installment", amount: 15000, dueDaysAfterEnrollment: 30 },
+      { label: "Third installment", paymentCategory: "installment", amount: 15000, dueDaysAfterEnrollment: 60 },
+    ],
+  }, 5000);
+  assert.equal(plan.paymentPlan.installments[0].paymentCategory, "registration");
+  assert.equal(plan.paymentPlan.installments.length, 4);
+  assert.ok(validateProgrammePaymentPlan({
+    ...plan.paymentPlan,
+    installments: [
+      { ...plan.paymentPlan.installments[0], amount: 4000 },
+      ...plan.paymentPlan.installments.slice(1),
+    ],
+  }, 5000).error);
+});
+
+test("calculates the next unpaid installment and its remaining amount", () => {
+  const installments = [
+    { sequenceNumber: 1, amount: 1000 },
+    { sequenceNumber: 2, amount: 1000 },
+    { sequenceNumber: 3, amount: 1000 },
+  ];
+  assert.deepEqual(getNextInstallmentPayment(installments, 0, 3000), {
+    sequenceNumber: 1,
+    amount: 1000,
+  });
+  assert.deepEqual(getNextInstallmentPayment(installments, 1500, 3000), {
+    sequenceNumber: 2,
+    amount: 500,
+  });
+  assert.deepEqual(getNextInstallmentPayment(installments, 2000, 3000), {
+    sequenceNumber: 3,
+    amount: 1000,
+  });
+  assert.equal(getNextInstallmentPayment(installments, 3000, 3000), null);
+});
+
 test("validates ordered learning modules, secure live classes, and whiteboard strokes", () => {
   const module = {
     title: "Module one",
@@ -386,76 +458,6 @@ test("validates ordered learning modules, secure live classes, and whiteboard st
     description: "Build software skills.",
     sortOrder: 1,
     isActive: true,
-  });
-
-  test("validates programme payment plans against fee and ordered installment totals", () => {
-    const plan = {
-      totalFee: 250000,
-      paymentInstructions: "Pay using the account details provided by the office.",
-      installments: [
-        { label: "Registration fee", paymentCategory: "registration", amount: 50000, dueDaysAfterEnrollment: 0 },
-        { label: "Course balance", amount: 200000, dueDaysAfterEnrollment: 30 },
-      ],
-    };
-    assert.equal(validateProgrammePaymentPlan(plan, 50000).paymentPlan.installments.length, 2);
-    assert.ok(validateProgrammePaymentPlan(plan, 300000).error);
-    assert.ok(validateProgrammePaymentPlan({ ...plan, totalFee: 260000 }).error);
-    assert.ok(validateProgrammePaymentPlan({
-      ...plan,
-      installments: [{ label: "Course balance", amount: 250000, dueDaysAfterEnrollment: 0 }],
-    }, 50000).error);
-    assert.ok(validateProgrammePaymentPlan({
-      ...plan,
-      installments: [plan.installments[1], plan.installments[0]],
-    }).error);
-    assert.deepEqual(validateProgrammePaymentPlan({
-      totalFee: 0,
-      paymentInstructions: "",
-      installments: [],
-    }).paymentPlan.installments, []);
-  });
-
-  test("validates registration followed by three installments", () => {
-    const plan = validateProgrammePaymentPlan({
-      totalFee: 50000,
-      paymentInstructions: "",
-      installments: [
-        { label: "Registration fee", paymentCategory: "registration", amount: 5000, dueDaysAfterEnrollment: 0 },
-        { label: "First installment", paymentCategory: "installment", amount: 15000, dueDaysAfterEnrollment: 0 },
-        { label: "Second installment", paymentCategory: "installment", amount: 15000, dueDaysAfterEnrollment: 30 },
-        { label: "Third installment", paymentCategory: "installment", amount: 15000, dueDaysAfterEnrollment: 60 },
-      ],
-    }, 5000);
-    assert.equal(plan.paymentPlan.installments[0].paymentCategory, "registration");
-    assert.equal(plan.paymentPlan.installments.length, 4);
-    assert.ok(validateProgrammePaymentPlan({
-      ...plan.paymentPlan,
-      installments: [
-        { ...plan.paymentPlan.installments[0], amount: 4000 },
-        ...plan.paymentPlan.installments.slice(1),
-      ],
-    }, 5000).error);
-  });
-
-  test("calculates the next unpaid installment and its remaining amount", () => {
-    const installments = [
-      { sequenceNumber: 1, amount: 1000 },
-      { sequenceNumber: 2, amount: 1000 },
-      { sequenceNumber: 3, amount: 1000 },
-    ];
-    assert.deepEqual(getNextInstallmentPayment(installments, 0, 3000), {
-      sequenceNumber: 1,
-      amount: 1000,
-    });
-    assert.deepEqual(getNextInstallmentPayment(installments, 1500, 3000), {
-      sequenceNumber: 2,
-      amount: 500,
-    });
-    assert.deepEqual(getNextInstallmentPayment(installments, 2000, 3000), {
-      sequenceNumber: 3,
-      amount: 1000,
-    });
-    assert.equal(getNextInstallmentPayment(installments, 3000, 3000), null);
   });
   assert.equal(programme.programme.registrationFee, 0);
   assert.equal(validateProgramme({

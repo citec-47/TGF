@@ -222,6 +222,13 @@
   letter-spacing: 0.32em;
 }
 
+.corp-hero-seal img {
+  width: 168px;
+  max-width: calc(100% - 28px);
+  height: auto;
+  object-fit: contain;
+}
+
 .corp-hero-art-caption {
   position: absolute;
   right: 0;

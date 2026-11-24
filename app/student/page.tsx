@@ -12,12 +12,12 @@ export default async function StudentPage() {
   const body = await loadPageBody("student.html", "TGFVP student learning space");
 
   return (
-    <>
+    <div className="admin-page classroom-page">
       <div dangerouslySetInnerHTML={{ __html: body }} />
       <PdfPageRenderer />
       <Script src="/classroom.js" strategy="afterInteractive" />
       <Script src="/messages.js" strategy="afterInteractive" />
       <Script src="/collaboration.js" strategy="afterInteractive" />
-    </>
+    </div>
   );
 }

@@ -121,6 +121,8 @@ const rejectAccountMessage = document.querySelector("#reject-account-message");
 const overviewMessage = document.querySelector("#overview-message");
 const overviewTasks = document.querySelector("#overview-tasks");
 const overviewActivity = document.querySelector("#overview-activity");
+const mediasoupStatus = document.querySelector("#overview-mediasoup-status");
+const mediasoupDetails = document.querySelector("#overview-mediasoup-details");
 const overviewStats = {
   students: document.querySelector("#overview-student-count"),
   pendingAccounts: document.querySelector("#overview-pending-account-count"),
@@ -275,6 +277,13 @@ function renderAdminOverview(overview) {
   for (const [key, element] of Object.entries(overviewStats)) {
     element.textContent = String(overview.stats[key]);
   }
+  const mediasoupConfigured = overview.integrations?.mediasoup?.configured === true;
+  mediasoupStatus.textContent = mediasoupConfigured ? "Configured" : "Needs setup";
+  mediasoupStatus.className = `admin-integration-status ${mediasoupConfigured ? "is-configured" : "is-missing"}`;
+  mediasoupDetails.textContent = mediasoupConfigured
+    ? "Socket.IO signaling and mediasoup SFU are running with this server."
+    : "Restart the server to initialize Socket.IO signaling and mediasoup.";
+
   const pendingPayments = overview.tasks.pendingPayments;
   paymentNavCount.textContent = String(pendingPayments);
   paymentNavCount.hidden = pendingPayments === 0;
@@ -374,6 +383,9 @@ async function loadAdminOverview() {
   } catch (error) {
     if (requestId !== adminOverviewRequest) return;
     for (const element of Object.values(overviewStats)) element.textContent = "—";
+    mediasoupStatus.textContent = "Status unavailable";
+    mediasoupStatus.className = "admin-integration-status";
+    mediasoupDetails.textContent = "The mediasoup configuration status could not be loaded.";
     overviewTasks.replaceChildren(makeTag("p", "admin-empty", "Overview data is unavailable."));
     overviewActivity.replaceChildren(makeTag("p", "admin-empty", "Recent activity is unavailable."));
     setMessage(overviewMessage, error.message, true);

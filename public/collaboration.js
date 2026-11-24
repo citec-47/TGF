@@ -26,12 +26,41 @@
     serverClockStarted: 0,
     liveGroups: [],
   };
+  const dashboardThemeStorageKey = "tgf-dashboard-theme";
+
+  function bootstrapDashboardTheme() {
+    const page = document.querySelector(".classroom-page");
+    if (!page) return;
+    let savedTheme = "light";
+    try {
+      savedTheme = window.localStorage.getItem(dashboardThemeStorageKey) || "light";
+    } catch {
+      savedTheme = "light";
+    }
+    if (!["light", "dark"].includes(savedTheme)) savedTheme = "light";
+    page.classList.toggle("is-dark", savedTheme === "dark");
+    document.body.classList.toggle("is-dark", savedTheme === "dark");
+    document.documentElement.style.colorScheme = savedTheme;
+  }
+
+  bootstrapDashboardTheme();
 
   function element(tag, className = "", text = "") {
     const item = document.createElement(tag);
     if (className) item.className = className;
     if (text) item.textContent = text;
     return item;
+  }
+
+  function formatRecordingDuration(totalSeconds) {
+    const seconds = Math.max(0, Math.floor(Number(totalSeconds) || 0));
+    const hours = Math.floor(seconds / 3600);
+    const minutes = Math.floor((seconds % 3600) / 60);
+    const remainder = seconds % 60;
+    const pad = (value) => String(value).padStart(2, "0");
+    return hours > 0
+      ? `${pad(hours)}:${pad(minutes)}:${pad(remainder)}`
+      : `${pad(minutes)}:${pad(remainder)}`;
   }
 
   function updateLiveGroupControls(form) {
@@ -89,10 +118,12 @@
     const name = form.querySelector("[data-live-group-name]");
     const members = form.querySelector("[data-live-group-members]");
     const save = form.querySelector("[data-live-group-save]");
+    const editor = form.querySelector("[data-live-group-editor]");
+    const summary = form.querySelector("[data-go-live-group-summary]");
     const status = form.querySelector("[data-go-live-status]");
     if (!course || !groupSelect || !name || !members || !save) return false;
     groupSelect.replaceChildren();
-    const placeholder = element("option", "", "Choose or create a group");
+    const placeholder = element("option", "", "Choose a group");
     placeholder.value = "";
     placeholder.disabled = true;
     placeholder.selected = true;
@@ -100,7 +131,9 @@
     state.liveGroups = [];
     if (!course.value) {
       groupSelect.disabled = false;
+      if (editor) editor.open = false;
       name.value = "";
+      if (summary) summary.textContent = "Select a course and saved group to start.";
       renderLiveGroupMembers(form, []);
       members.replaceChildren(element("p", "admin-empty", "Choose a course to load eligible students."));
       setStatus(status, "");
@@ -120,15 +153,27 @@
         groupSelect.append(option);
       }
       const selectedGroup = state.liveGroups.find((group) => group.id === selectedGroupId);
-      groupSelect.value = selectedGroup ? selectedGroup.id : "new";
+      groupSelect.value = selectedGroup
+        ? selectedGroup.id
+        : state.liveGroups.length ? "" : "new";
+      if (editor) editor.open = groupSelect.value === "new";
       name.value = selectedGroup ? selectedGroup.name : "";
+      if (summary) {
+        summary.textContent = selectedGroup
+          ? `${selectedGroup.memberIds.length} saved learner${selectedGroup.memberIds.length === 1 ? "" : "s"}; only eligible learners will be invited.`
+          : state.liveGroups.length
+            ? "Choose a saved group to go live, or create one below."
+            : "No groups saved for this course yet. Create one below to continue.";
+      }
       renderLiveGroupMembers(form, result.students || [], selectedGroup?.memberIds || []);
       setStatus(status, "");
       updateLiveGroupControls(form);
       return true;
     } catch (error) {
       groupSelect.disabled = true;
+      if (editor) editor.open = false;
       name.value = "";
+      if (summary) summary.textContent = "Group information could not be loaded.";
       renderLiveGroupMembers(form, []);
       members.replaceChildren(element("p", "admin-empty", "Eligible students could not be loaded."));
       save.disabled = true;
@@ -174,15 +219,23 @@
     const name = form.querySelector("[data-live-group-name]");
     const save = form.querySelector("[data-live-group-save]");
     const members = form.querySelector("[data-live-group-members]");
+    const summary = form.querySelector("[data-go-live-group-summary]");
     course?.addEventListener("change", () => void loadLiveGroupEditor(form));
     group?.addEventListener("change", () => {
       const selected = state.liveGroups.find((item) => item.id === group.value);
+      const groupEditor = form.querySelector("[data-live-group-editor]");
+      if (groupEditor) groupEditor.open = group.value === "new";
       name.value = selected ? selected.name : "";
-      const editor = form.querySelector("[data-live-group-members]");
-      if (editor) {
-        const studentIds = Array.from(editor.querySelectorAll("input[type=checkbox]"), (input) => input.value);
+      if (summary) {
+        summary.textContent = selected
+          ? `${selected.memberIds.length} saved learner${selected.memberIds.length === 1 ? "" : "s"}; only eligible learners will be invited.`
+          : group.value === "new" ? "Choose active, approved learners for this new group." : "Select a saved group to start.";
+      }
+      const membersEditor = form.querySelector("[data-live-group-members]");
+      if (membersEditor) {
+        const studentIds = Array.from(membersEditor.querySelectorAll("input[type=checkbox]"), (input) => input.value);
         const selectedIds = new Set(selected?.memberIds || []);
-        editor.querySelectorAll("input[type=checkbox]").forEach((input) => {
+        membersEditor.querySelectorAll("input[type=checkbox]").forEach((input) => {
           input.checked = selectedIds.has(input.value);
         });
         if (!studentIds.length) renderLiveGroupMembers(form, []);
@@ -224,7 +277,7 @@
       if (!form.reportValidity()) return;
       const submit = form.querySelector("[data-go-live-submit]");
       submit.disabled = true;
-      setStatus(form.querySelector("[data-go-live-status]"), "Preparing your class and inviting the selected group…");
+      setStatus(form.querySelector("[data-go-live-status]"), "Opening your camera, starting the recording, and inviting the selected group…");
       try {
         const result = await request("/api/collaboration/live-sessions", {
           method: "POST",
@@ -232,12 +285,9 @@
         });
         setStatus(
           form.querySelector("[data-go-live-status]"),
-          `${result.invitedCount} student${result.invitedCount === 1 ? "" : "s"} invited. Recording starts automatically as you enter.`,
+          `${result.invitedCount} student${result.invitedCount === 1 ? "" : "s"} invited. Opening the live room…`,
         );
-        void loadLiveSessions();
-        window.setTimeout(() => {
-          window.location.assign(`/live-class?sessionId=${encodeURIComponent(result.sessionId)}`);
-        }, 500);
+        window.location.assign(`/live-class?sessionId=${encodeURIComponent(result.sessionId)}`);
       } catch (error) {
         setStatus(form.querySelector("[data-go-live-status]"), error.message, true);
         updateLiveGroupControls(form);
@@ -251,6 +301,13 @@
     if (!toggle || !page || !["light", "dark"].includes(theme)) return;
     const isDark = theme === "dark";
     page.classList.toggle("is-dark", isDark);
+    document.body.classList.toggle("is-dark", isDark);
+    document.documentElement.style.colorScheme = theme;
+    try {
+      window.localStorage.setItem(dashboardThemeStorageKey, theme);
+    } catch {
+      // The server preference remains the fallback when storage is unavailable.
+    }
     toggle.setAttribute("aria-pressed", String(isDark));
     toggle.setAttribute("aria-label", `Switch to ${isDark ? "light" : "dark"} mode`);
     toggle.title = `Switch to ${isDark ? "light" : "dark"} mode`;
@@ -278,6 +335,7 @@
       toggle.hidden = true;
       return;
     }
+    if (toggle.dataset.directInitialized === "true") return;
     if (toggle.dataset.initialized) return;
     toggle.dataset.initialized = "true";
     toggle.addEventListener("click", async () => {
@@ -1033,10 +1091,12 @@
 
   function renderLiveSession(item) {
     const card = element("article", "collaboration-schedule-card live-class-card live-session-card");
+    const isEnded = Boolean(item.endedAt);
     const isLive = Boolean(item.startedAt);
     const heading = element("div", "live-class-card-heading");
     heading.append(
-      element("span", `live-class-status${isLive ? " is-live" : ""}`, isLive ? "Live now" : "Waiting for tutor"),
+      element("span", `live-class-status${isLive && !isEnded ? " is-live" : ""}`,
+        isEnded ? "Class ended" : isLive ? "Live now" : "Waiting for tutor"),
       element("span", "live-class-timezone", item.groupName || "Invited group"),
     );
     card.append(
@@ -1045,17 +1105,23 @@
       element("p", "live-class-tutor", state.account?.role === "teacher"
         ? `${item.invitedCount} student${item.invitedCount === 1 ? "" : "s"} invited`
         : `Tutor · ${item.teacherName}`),
-      element("p", "admin-location-subtitle", isLive
-        ? "Your tutor has started this class."
-        : "The waiting room is open. Your class will begin when the tutor starts the lesson."),
+      element("p", "admin-location-subtitle", isEnded
+        ? "Your tutor has ended this class."
+        : isLive
+          ? "Your tutor has started this class."
+          : "The waiting room is open. Your class will begin when the tutor starts the lesson."),
     );
-    card.append(makeButton(
-      state.account?.role === "teacher" ? "Open live class" : "Join live class",
-      () => {
-        window.location.href = `/live-class?sessionId=${encodeURIComponent(item.sessionId)}`;
-      },
-      "button button-orange live-class-join",
-    ));
+    if (!isEnded) {
+      card.append(makeButton(
+        state.account?.role === "teacher"
+          ? (isLive ? "Rejoin live class" : "Open live class")
+          : (isLive ? "Rejoin live class" : "Join live class"),
+        () => {
+          window.location.href = `/live-class?sessionId=${encodeURIComponent(item.sessionId)}`;
+        },
+        "button button-orange live-class-join",
+      ));
+    }
     return card;
   }
 
@@ -1064,6 +1130,10 @@
     if (!lists.length) return;
     try {
       const result = await request("/api/collaboration/live-sessions");
+      updateStudentLiveClassCount(
+        "invitationLiveCount",
+        result.sessions?.filter((session) => !session.endedAt).length || 0,
+      );
       for (const list of lists) {
         list.classList.add("live-class-grid");
         list.replaceChildren();
@@ -1075,16 +1145,15 @@
     }
   }
 
-  function getCameroonDate(value) {
-    if (!Number.isFinite(Date.parse(value))) return "";
-    const parts = new Intl.DateTimeFormat("en", {
-      timeZone: "Africa/Douala",
-      year: "numeric",
-      month: "2-digit",
-      day: "2-digit",
-    }).formatToParts(new Date(value));
-    const datePart = (type) => parts.find((part) => part.type === type)?.value || "";
-    return `${datePart("year")}-${datePart("month")}-${datePart("day")}`;
+  function updateStudentLiveClassCount(source, count) {
+    const counter = document.querySelector("#student-live-count");
+    if (!counter) return;
+    counter.dataset[source] = String(count);
+    counter.textContent = String(
+      Number(counter.dataset.courseLiveCount || 0) +
+      Number(counter.dataset.timetableLiveCount || 0) +
+      Number(counter.dataset.invitationLiveCount || 0),
+    );
   }
 
   async function loadSchedule() {
@@ -1104,18 +1173,15 @@
       ]);
       syncServerClock(result.serverNow);
       const upcoming = result.occurrences.filter((item) => item.attendanceStatus === "upcoming");
-      const today = getCameroonDate(result.serverNow);
-      const dashboardOccurrence = upcoming.find((item) => item.classDate === today) || upcoming[0];
+      updateStudentLiveClassCount("timetableLiveCount", upcoming.length);
       for (const list of liveClassLists) {
         list.classList.add("live-class-grid");
         list.replaceChildren();
         const isOverview = list.hasAttribute("data-collab-live-overview");
-        const occurrences = isOverview
-          ? dashboardOccurrence ? [dashboardOccurrence] : []
-          : upcoming;
+        const occurrences = isOverview ? upcoming.slice(0, 3) : upcoming;
         if (!occurrences.length) {
           setEmpty(list, isOverview
-            ? "No live classes are scheduled for today or the next available date."
+            ? "No upcoming events are scheduled yet."
             : "No upcoming live classes are scheduled.");
         } else list.append(...occurrences.map((item) => renderOccurrence(item)));
       }
@@ -1179,6 +1245,9 @@
       element("h3", "", `${item.programmeTitle} · ${item.classDate}`),
       element("p", "admin-location-subtitle", `Tutor: ${item.teacherName}`),
     );
+    if (item.durationSeconds > 0) {
+      card.append(element("p", "admin-location-subtitle", `Recording duration: ${formatRecordingDuration(item.durationSeconds)}`));
+    }
     if (item.recordingStatus === "ready") {
       const video = element("video", "collaboration-recording-video");
       video.src = item.playbackUrl;
@@ -1189,22 +1258,29 @@
     } else {
       card.append(element("span", `visibility-badge${item.recordingStatus === "failed" ? " is-hidden" : ""}`, item.recordingStatus));
       if (item.recordingError) card.append(element("p", "admin-message is-error", item.recordingError));
-      if (isAdmin && item.recordingStatus === "failed") {
-        const retry = makeButton("Retry recording processing", async () => {
-          retry.disabled = true;
-          try {
-            await request(`/api/collaboration/sessions/${encodeURIComponent(item.sessionId)}/retry-recording`, {
-              method: "POST",
-              body: JSON.stringify({}),
-            });
-            retry.textContent = "Retry queued";
-            await loadRecordings();
-          } catch (error) {
-            retry.disabled = false;
-            card.append(element("p", "admin-message is-error", error.message));
-          }
-        }, "button button-quiet");
-        card.append(retry);
+      if (item.recordingStatus === "failed") {
+        card.append(element("p", "admin-location-subtitle", "The tutor can retry the upload from the live-class page while that page remains open."));
+        if (isAdmin) {
+          const deleteButton = element("button", "small-action small-action-danger", "Delete failed entry");
+          deleteButton.type = "button";
+          deleteButton.addEventListener("click", async () => {
+            if (!window.confirm(
+              "Delete this failed recording from General Classes? The tutor will still see it for troubleshooting.",
+            )) return;
+            deleteButton.disabled = true;
+            try {
+              await request(`/api/collaboration/recordings/${encodeURIComponent(item.sessionId)}`, {
+                method: "DELETE",
+                body: JSON.stringify({}),
+              });
+              await loadRecordings();
+            } catch (error) {
+              card.append(element("p", "admin-message is-error", error.message));
+              deleteButton.disabled = false;
+            }
+          });
+          card.append(deleteButton);
+        }
       }
     }
     return card;
@@ -1427,7 +1503,10 @@
     window.clearInterval(state.refreshTimer);
     state.refreshTimer = window.setInterval(refreshAll, 60000);
     window.clearInterval(state.scheduleRefreshTimer);
-    state.scheduleRefreshTimer = window.setInterval(() => void loadSchedule(), 15000);
+    state.scheduleRefreshTimer = window.setInterval(() => {
+      void loadSchedule();
+      void loadLiveSessions();
+    }, 15000);
   }
 
   function initialize() {
@@ -1475,9 +1554,6 @@
     window.addEventListener("tgf-account-signed-out", () => {
       state.account = null;
       state.stream?.close();
-      const themeToggle = document.querySelector("#dashboard-theme-toggle");
-      if (themeToggle) themeToggle.hidden = true;
-      document.querySelector(".classroom-page")?.classList.remove("is-dark");
       setStatus(document.querySelector("[data-user-theme-status]"), "");
       window.clearInterval(state.refreshTimer);
       window.clearInterval(state.scheduleRefreshTimer);

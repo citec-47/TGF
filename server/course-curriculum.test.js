@@ -1,6 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { validateGeneratedCurriculum } from "./course-curriculum.js";
+import {
+  recommendVideoModuleCount,
+  validateGeneratedCurriculum,
+} from "./course-curriculum.js";
 
 function validModule() {
   return {
@@ -37,6 +40,14 @@ test("rejects a generated curriculum with the wrong number of modules or weeks",
     }, 1).error,
     /four weekly blocks/,
   );
+});
+
+test("recommends one module per video hour, capped at eight", () => {
+  assert.equal(recommendVideoModuleCount(1), 1);
+  assert.equal(recommendVideoModuleCount(3600), 1);
+  assert.equal(recommendVideoModuleCount(3601), 2);
+  assert.equal(recommendVideoModuleCount(8 * 3600 + 1), 8);
+  assert.equal(recommendVideoModuleCount(0), null);
 });
 
 test("rejects a block without student-facing lesson content", () => {

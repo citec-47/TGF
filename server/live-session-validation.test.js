@@ -50,8 +50,8 @@ test("denies enrolled learners who were not invited to an instant live class", (
   }), { allowed: false, role: null, status: 403 });
 });
 
-test("learner grants do not allow publishing until the teacher changes permissions", () => {
-  assert.equal(canInitiallyPublish("learner"), false);
+test("learners and teachers can publish while administrators cannot", () => {
+  assert.equal(canInitiallyPublish("learner"), true);
   assert.equal(canInitiallyPublish("teacher"), true);
   assert.equal(canInitiallyPublish("administrator"), false);
 });

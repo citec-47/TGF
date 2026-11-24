@@ -131,7 +131,7 @@
   flex-direction: column;
 }
 
-body.classroom-page {
+.classroom-page {
   background: var(--paper);
   transition: background-color 160ms ease, color 160ms ease;
 }
@@ -468,6 +468,31 @@ body.classroom-page {
   border: 1px solid #e3dfd8;
   padding: 16px;
   background: #fff;
+}
+
+.admin-integration-card {
+  margin-top: 16px;
+}
+
+.admin-integration-status {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  padding: 5px 10px;
+  background: #eeeae4;
+  color: #514a42;
+  font-size: 0.8rem;
+  font-weight: 700;
+}
+
+.admin-integration-status.is-configured {
+  background: #e5f2e8;
+  color: #21633b;
+}
+
+.admin-integration-status.is-missing {
+  background: #fff0df;
+  color: #8a4c10;
 }
 
 .admin-overview-section-heading {
@@ -5013,6 +5038,68 @@ body.classroom-page {
   color: #f4eee8;
 }
 
+.admin-page.is-dark,
+.admin-page.is-dark body,
+.admin-page.is-dark .student-dashboard-shell,
+.admin-page.is-dark .student-dashboard-content,
+.admin-page.is-dark .student-dashboard-overview,
+.admin-page.is-dark .student-progress-overview,
+.admin-page.is-dark .student-dashboard-section,
+.admin-page.is-dark .student-quick-card,
+.admin-page.is-dark .student-stat,
+.admin-page.is-dark .collaboration-schedule-card,
+.admin-page.is-dark .collaboration-schedule-list,
+.admin-page.is-dark .live-class-card,
+.admin-page.is-dark .module-card,
+.admin-page.is-dark .course-card {
+  background: #171513;
+  color: #f4eee8;
+}
+
+.admin-page.is-dark .student-dashboard-content,
+.admin-page.is-dark .student-dashboard-overview,
+.admin-page.is-dark .student-progress-overview {
+  border-color: transparent;
+}
+
+.admin-page.is-dark .classroom-heading,
+.admin-page.is-dark .student-welcome,
+.admin-page.is-dark .teacher-welcome,
+.admin-page.is-dark .student-dashboard-section-heading,
+.admin-page.is-dark .student-progress-overview > h2,
+.admin-page.is-dark .student-progress-overview > h3,
+.admin-page.is-dark .student-dashboard-section-heading h2,
+.admin-page.is-dark .collaboration-schedule-card h3,
+.admin-page.is-dark .live-class-card h3 {
+  color: #f4eee8;
+}
+
+.admin-page.is-dark .student-dashboard-section,
+.admin-page.is-dark .student-progress-overview,
+.admin-page.is-dark .student-dashboard-overview,
+.admin-page.is-dark .student-quick-card,
+.admin-page.is-dark .student-stat,
+.admin-page.is-dark .collaboration-schedule-card,
+.admin-page.is-dark .live-class-card,
+.admin-page.is-dark .course-card,
+.admin-page.is-dark .module-card {
+  border-color: #49433e;
+  background: #211f1d;
+  color: #f4eee8;
+}
+
+.admin-page.is-dark .student-quick-copy small,
+.admin-page.is-dark .student-stat span,
+.admin-page.is-dark .student-stat small,
+.admin-page.is-dark .admin-location-subtitle,
+.admin-page.is-dark .collaboration-schedule-card p,
+.admin-page.is-dark .live-class-card p,
+.admin-page.is-dark .admin-empty,
+.admin-page.is-dark .micro-label,
+.admin-page.is-dark time {
+  color: #c2b9af;
+}
+
 .admin-page.is-dark .site-header,
 .admin-page.is-dark .site-footer {
   border-color: #3a3530;
@@ -6118,6 +6205,24 @@ body.classroom-page {
   grid-template-columns: minmax(0, 1fr);
 }
 
+.live-group-editor {
+  border: 1px solid var(--admin-border);
+  border-radius: 10px;
+  padding: 12px;
+  background: var(--admin-surface-alt);
+}
+
+.live-group-editor summary {
+  color: var(--admin-ink);
+  cursor: pointer;
+  font-weight: 700;
+}
+
+.live-group-editor[open] {
+  display: grid;
+  gap: 10px;
+}
+
 .live-group-members {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr));
@@ -6302,14 +6407,159 @@ body.classroom-page {
 
 .livekit-page {
   min-height: 100vh;
-  padding: clamp(18px, 4vw, 48px);
-  background: var(--paper);
+  padding: clamp(12px, 2.5vw, 32px);
+  background:
+    radial-gradient(circle at 15% 10%, rgb(218 138 84 / 12%), transparent 22rem),
+    linear-gradient(145deg, #f7f4ef 0%, #eceae5 100%);
   color: var(--ink);
 }
 
-.livekit-room {
-  width: min(1440px, 100%);
+.livekit-dashboard-shell {
+  display: grid;
+  grid-template-columns: 232px minmax(0, 1fr);
+  align-items: start;
+  gap: 24px;
+  width: min(1500px, 100%);
   margin: 0 auto;
+}
+
+.livekit-dashboard-shell .livekit-room {
+  width: 100%;
+  min-width: 0;
+  margin: 0;
+}
+
+.livekit-dashboard-sidebar {
+  max-height: calc(100vh - 32px);
+  overflow-y: auto;
+}
+
+.livekit-room {
+  width: min(1500px, 100%);
+  margin: 0 auto;
+}
+
+.livekit-header {
+  border: 1px solid rgb(61 54 48 / 10%);
+  border-radius: 18px;
+  padding: 16px 18px;
+  background: rgb(255 255 255 / 88%);
+  box-shadow: 0 16px 50px rgb(31 29 26 / 7%);
+  backdrop-filter: blur(14px);
+}
+
+.livekit-header h1 {
+  font-size: clamp(1.45rem, 2.2vw, 2.15rem);
+  letter-spacing: -0.035em;
+}
+
+.livekit-layout {
+  grid-template-columns: minmax(280px, 340px) minmax(0, 1fr);
+  gap: 14px;
+  margin-top: 14px;
+}
+
+.livekit-main-view {
+  min-height: clamp(420px, 64vh, 720px);
+  border: 0;
+  border-radius: 18px;
+  background:
+    radial-gradient(circle at 50% 40%, rgb(210 111 53 / 16%), transparent 30%),
+    linear-gradient(145deg, #171915, #0d0f0d);
+  box-shadow: 0 20px 60px rgb(18 17 15 / 16%);
+}
+
+.livekit-main-video {
+  min-height: clamp(420px, 64vh, 720px);
+  border-radius: 18px;
+}
+
+.livekit-sidebar {
+  grid-template-rows: minmax(190px, auto) minmax(360px, 1fr);
+  gap: 14px;
+}
+
+.livekit-roster,
+.livekit-chat {
+  border: 1px solid rgb(61 54 48 / 10%);
+  border-radius: 18px;
+  background: rgb(255 255 255 / 92%);
+  box-shadow: 0 12px 36px rgb(31 29 26 / 6%);
+}
+
+.livekit-roster {
+  padding: 14px;
+}
+
+.livekit-roster h2 {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+  font-size: 1.05rem;
+}
+
+.livekit-roster h2 span {
+  background: #f0e2d4;
+  color: #7d4424;
+}
+
+.livekit-student-row {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  max-height: 220px;
+}
+
+.livekit-student-tile {
+  border: 1px solid #eee7df;
+  border-radius: 13px;
+  padding: 10px;
+  background: #fbfaf8;
+  transition: transform 150ms ease, border-color 150ms ease, box-shadow 150ms ease;
+}
+
+.livekit-student-tile:hover {
+  transform: translateY(-2px);
+  border-color: #e1bea1;
+  box-shadow: 0 8px 20px rgb(94 65 43 / 8%);
+}
+
+.livekit-student-avatar {
+  width: 44px;
+  height: 44px;
+  margin-bottom: 8px;
+  border: 2px solid #fff;
+  box-shadow: 0 4px 12px rgb(68 49 35 / 12%);
+}
+
+.livekit-chat {
+  min-height: 410px;
+  padding: 14px;
+}
+
+.livekit-chat-messages {
+  max-height: 360px;
+  background: #fbfaf8;
+  border-radius: 12px;
+  padding: 10px;
+}
+
+.livekit-chat-message {
+  max-width: 94%;
+  border: 0;
+  border-radius: 12px 12px 12px 4px;
+  padding: 10px;
+  background: #f1efea;
+  box-shadow: 0 3px 12px rgb(31 29 26 / 4%);
+}
+
+.livekit-chat-form input {
+  height: 44px;
+  border-radius: 12px;
+  background: #fbfaf8;
+}
+
+.livekit-chat-form .button {
+  border-radius: 12px;
 }
 
 .livekit-header,
@@ -6327,6 +6577,31 @@ body.classroom-page {
   justify-content: flex-end;
   flex-wrap: wrap;
   gap: 10px;
+}
+
+.livekit-theme-toggle {
+  display: inline-grid;
+  width: 42px;
+  height: 42px;
+  border: 1px solid var(--line);
+  border-radius: 50%;
+  place-items: center;
+  background: var(--white);
+  color: var(--ink);
+  cursor: pointer;
+  font-size: 1.15rem;
+  transition: 160ms ease;
+}
+
+.livekit-theme-toggle:hover:not(:disabled) {
+  border-color: var(--orange);
+  background: #fff4ea;
+  transform: rotate(8deg);
+}
+
+.livekit-theme-toggle:disabled {
+  cursor: wait;
+  opacity: 0.65;
 }
 
 .livekit-recording-badge {
@@ -6350,6 +6625,16 @@ body.classroom-page {
   border-radius: 50%;
   background: #c43b30;
   box-shadow: 0 0 0 4px rgb(196 59 48 / 12%);
+}
+
+.livekit-recording-notice {
+  margin: 12px 0;
+  border: 1px solid #e8c7c1;
+  border-radius: 12px;
+  padding: 12px 16px;
+  background: #fff8f6;
+  color: #842d25;
+  font-weight: 600;
 }
 
 .livekit-header-actions .button-danger {
@@ -6412,22 +6697,107 @@ body.classroom-page {
 
 .livekit-layout {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 260px;
-  gap: 18px;
+  grid-template-columns: minmax(280px, 340px) minmax(0, 1fr);
+  grid-template-areas: "sidebar video";
+  align-items: start;
+  gap: 16px;
+}
+
+.livekit-main-view {
+  grid-area: video;
+  position: relative;
+  display: grid;
+  min-height: 520px;
+  overflow: hidden;
+  border-radius: 14px;
+  border: 1px solid var(--line);
+  place-items: center;
+  background: #151714;
+}
+
+.livekit-main-video {
+  width: 100%;
+  height: 100%;
+  min-height: 520px;
+  object-fit: contain;
+  background: #151714;
+}
+
+.livekit-main-placeholder {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  color: #fff;
+  font-size: 1.1rem;
+  background:
+    radial-gradient(circle at 50% 45%, rgb(210 111 53 / 22%), transparent 26%),
+    #151714;
+}
+
+.livekit-student-row {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  max-height: 220px;
+  overflow: auto;
+}
+
+.livekit-student-tile {
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 8px;
+  background: var(--paper);
+  color: var(--ink);
+  text-align: left;
+}
+
+.livekit-student-avatar {
+  display: grid;
+  width: 38px;
+  height: 38px;
+  margin-bottom: 6px;
+  border-radius: 50%;
+  place-items: center;
+  background: #e2a06f;
+  color: #fff;
+  font-weight: 800;
+  object-fit: cover;
+}
+
+.livekit-student-tile strong,
+.livekit-student-tile small {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.livekit-student-tile small {
+  color: var(--admin-ink-soft);
+  margin-top: 3px;
+}
+
+.livekit-student-tile .livekit-hand {
+  color: #842d25;
+  font-weight: 800;
 }
 
 .livekit-video-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 340px), 1fr));
   align-content: start;
-  gap: 14px;
+  gap: 12px;
 }
 
 .livekit-participant,
 .livekit-roster {
+  min-width: 0;
+  overflow: hidden;
   border-radius: 12px;
   border: 1px solid var(--line);
-  padding: 14px;
+  padding: 10px;
   background: var(--white);
 }
 
@@ -6438,15 +6808,18 @@ body.classroom-page {
 .livekit-media {
   position: relative;
   display: grid;
-  min-height: 220px;
+  width: 100%;
+  min-height: 0;
+  aspect-ratio: 16 / 9;
   place-items: center;
   overflow: hidden;
+  border-radius: 8px;
   background: #171513;
 }
 
 .livekit-video {
   width: 100%;
-  max-height: 420px;
+  height: 100%;
   object-fit: cover;
 }
 
@@ -6458,6 +6831,7 @@ body.classroom-page {
 }
 
 .livekit-avatar {
+  position: absolute;
   display: grid;
   width: 84px;
   height: 84px;
@@ -6467,6 +6841,23 @@ body.classroom-page {
   color: #fff;
   font-size: 2rem;
   font-weight: 700;
+}
+
+.livekit-camera-off {
+  position: absolute;
+  right: 12px;
+  bottom: 10px;
+  color: #fff;
+  font-size: 0.78rem;
+  text-shadow: 0 1px 3px #000;
+}
+
+.livekit-sidebar {
+  grid-area: sidebar;
+  display: grid;
+  grid-template-rows: auto minmax(380px, 1fr);
+  gap: 12px;
+  min-width: 0;
 }
 
 .livekit-participant-label {
@@ -6507,6 +6898,8 @@ body.classroom-page {
 .livekit-roster ul {
   display: grid;
   gap: 10px;
+  max-height: 180px;
+  overflow: auto;
   margin: 0;
   padding: 0;
   list-style: none;
@@ -6528,9 +6921,11 @@ body.classroom-page {
 
 .livekit-chat {
   display: grid;
-  grid-template-rows: auto minmax(180px, 320px) auto;
+  grid-template-rows: auto minmax(120px, 1fr) auto;
   gap: 14px;
-  margin-top: 18px;
+  min-height: 380px;
+  min-width: 0;
+  margin-top: 0;
   border: 1px solid var(--line);
   border-radius: 14px;
   padding: 18px;
@@ -6588,6 +6983,50 @@ body.classroom-page {
   overflow-wrap: anywhere;
 }
 
+.livekit-chat-person {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+
+.livekit-chat-person > div {
+  display: grid;
+  gap: 1px;
+}
+
+.livekit-chat-person small {
+  color: var(--admin-ink-soft);
+  font-size: 0.72rem;
+}
+
+.livekit-chat-avatar {
+  width: 36px;
+  height: 36px;
+  flex: 0 0 36px;
+  border-radius: 50%;
+  object-fit: cover;
+  background: #e2a06f;
+}
+
+.livekit-chat-avatar-fallback {
+  display: grid;
+  place-items: center;
+  color: #fff;
+  font-weight: 800;
+}
+
+.livekit-avatar-fallback {
+  overflow: hidden;
+  padding: 0;
+  line-height: 0;
+}
+
+.livekit-avatar-fallback svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
 .livekit-chat-form {
   display: flex;
   gap: 10px;
@@ -6612,10 +7051,84 @@ body.classroom-page {
   clip-path: inset(50%);
 }
 
+.livekit-page.is-dark {
+  --ink: #f4eee8;
+  --line: #403a35;
+  --paper: #171513;
+  --white: #211f1d;
+  --admin-ink-soft: #c2b9af;
+  background:
+    radial-gradient(circle at 15% 10%, rgb(210 111 53 / 10%), transparent 22rem),
+    linear-gradient(145deg, #171513, #11100f);
+  color: var(--ink);
+}
+
+.livekit-page.is-dark .livekit-header,
+.livekit-page.is-dark .livekit-roster,
+.livekit-page.is-dark .livekit-chat {
+  border-color: #403a35;
+  background: rgb(33 31 29 / 94%);
+  color: #f4eee8;
+}
+
+.livekit-page.is-dark .livekit-main-view,
+.livekit-page.is-dark .livekit-main-video {
+  background: #0d0f0d;
+}
+
+.livekit-page.is-dark .livekit-theme-toggle,
+.livekit-page.is-dark .livekit-student-tile,
+.livekit-page.is-dark .livekit-chat-messages,
+.livekit-page.is-dark .livekit-chat-message,
+.livekit-page.is-dark .livekit-chat-form input {
+  border-color: #403a35;
+  background: #171513;
+  color: #f4eee8;
+}
+
+.livekit-page.is-dark .livekit-student-tile:hover {
+  border-color: #9a653f;
+  box-shadow: 0 8px 20px rgb(0 0 0 / 20%);
+}
+
+.livekit-page.is-dark .livekit-recording-badge,
+.livekit-page.is-dark .livekit-recording-notice {
+  border-color: #71453f;
+  background: #382522;
+  color: #ffb3aa;
+}
+
+.livekit-page.is-dark .livekit-chat-empty,
+.livekit-page.is-dark .livekit-student-tile small,
+.livekit-page.is-dark .livekit-chat-person small {
+  color: #c2b9af;
+}
+
 @media (max-width: 760px) {
+  .livekit-page {
+    padding: 8px;
+  }
+
+  .livekit-dashboard-shell {
+    display: block;
+    padding-bottom: 64px;
+  }
+
+  .livekit-dashboard-sidebar nav {
+    justify-content: flex-start;
+    overflow-x: auto;
+  }
+
+  .livekit-dashboard-sidebar nav a {
+    min-width: 78px;
+    flex: 0 0 78px;
+  }
+
   .livekit-header {
     align-items: stretch;
     flex-direction: column;
+    border-radius: 14px;
+    padding: 13px;
   }
 
   .livekit-header-actions {
@@ -6624,10 +7137,18 @@ body.classroom-page {
 
   .livekit-layout {
     grid-template-columns: 1fr;
+    grid-template-areas:
+      "video"
+      "sidebar";
   }
 
-  .livekit-media {
-    min-height: 190px;
+  .livekit-main-view,
+  .livekit-main-video {
+    min-height: 46vh;
+  }
+
+  .livekit-sidebar {
+    grid-template-rows: auto minmax(320px, 1fr);
   }
 
   .livekit-chat {

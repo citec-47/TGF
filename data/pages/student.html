@@ -32,7 +32,6 @@
             aria-label="Switch to dark mode"
             aria-pressed="false"
             title="Switch to dark mode"
-            hidden
           >
             <svg class="icon-moon" viewBox="0 0 24 24" aria-hidden="true">
               <path d="M20.2 15.4A8.5 8.5 0 0 1 8.6 3.8 8.6 8.6 0 1 0 20.2 15.4Z"></path>
@@ -169,12 +168,12 @@
                 <div class="student-dashboard-summary" aria-label="Learning overview">
                   <div class="student-stat"><span>Approved pathways</span><strong id="student-active-count">0</strong></div>
                   <div class="student-stat"><span>Modules completed</span><strong id="student-completed-count">0</strong></div>
-                  <div class="student-stat"><span>Upcoming live classes</span><strong id="student-live-count">0</strong></div>
+                  <div class="student-stat"><span>Upcoming events</span><strong id="student-live-count">0</strong></div>
                 </div>
+                <h3>Upcoming events</h3>
+                <div class="collaboration-schedule-list" data-collab-live-overview aria-live="polite"></div>
                 <h3>Live class invitations</h3>
                 <div class="collaboration-schedule-list" data-collab-live-sessions aria-live="polite"></div>
-                <h3>Your next scheduled class</h3>
-                <div class="collaboration-schedule-list" data-collab-live-overview aria-live="polite"></div>
               </section>
             </section>
             <section id="student-fees" class="student-dashboard-section student-dashboard-view" aria-labelledby="student-fees-title" hidden>

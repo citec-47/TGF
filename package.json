@@ -5,26 +5,27 @@
   "description": "Transgenerational Forces Group corporate website and TGF Vocational Pathways platform",
   "type": "module",
   "scripts": {
-    "dev": "next dev",
+    "dev": "node server/custom-server.mjs",
     "build": "next build",
-    "start": "next start",
-    "check": "node --check server/location-validation.js && node --check server/message-validation.js && node --check server/collaboration-validation.js && node --check server/live-session-validation.js && node --check server/account-security.js && node --check server/site-settings.js && node --check server/learning-validation.js && node --check server/course-curriculum.js && node --check server/document-curriculum.js && node --check server/gemini-curriculum.js && node --check server/openai-curriculum.js && node --check server/public-submissions-validation.js && node --check server/corporate-content-validation.js && node --check server/location-validation.test.js && node --check server/message-validation.test.js && node --check server/collaboration-validation.test.js && node --check server/live-session-validation.test.js && node --check server/course-curriculum.test.js && node --check server/document-curriculum.test.js && node --check server/gemini-curriculum.test.js && node --check server/openai-curriculum.test.js && node --check server/public-submissions-validation.test.js && node --check server/corporate-content-validation.test.js && node --check scripts/migrate.js && node --check public/app.js && node --check public/admin.js && node --check public/portal.js && node --check public/classroom.js && node --check public/messages.js && node --check public/collaboration.js && node --check public/corporate.js && node --check public/corporate-content-admin.js && node --check public/submissions-admin.js && tsc --noEmit",
-    "test": "node --test server/location-validation.test.js server/message-validation.test.js server/collaboration-validation.test.js server/live-session-validation.test.js server/course-curriculum.test.js server/document-curriculum.test.js server/gemini-curriculum.test.js server/openai-curriculum.test.js server/public-submissions-validation.test.js server/corporate-content-validation.test.js",
+    "start": "NODE_ENV=production node server/custom-server.mjs",
+    "check": "node --check server/location-validation.js && node --check server/message-validation.js && node --check server/collaboration-validation.js && node --check server/live-session-validation.js && node --check server/account-security.js && node --check server/site-settings.js && node --check server/learning-validation.js && node --check server/course-curriculum.js && node --check server/document-curriculum.js && node --check server/gemini-curriculum.js && node --check server/openai-curriculum.js && node --check server/public-submissions-validation.js && node --check server/corporate-content-validation.js && node --check server/live-class-auth.js && node --check server/live-class-validation.js && node --check server/live-class-sfu.js && node --check server/live-recording-storage.js && node --check server/custom-server.mjs && node --check server/location-validation.test.js && node --check server/message-validation.test.js && node --check server/collaboration-validation.test.js && node --check server/live-session-validation.test.js && node --check server/course-curriculum.test.js && node --check server/document-curriculum.test.js && node --check server/gemini-curriculum.test.js && node --check server/openai-curriculum.test.js && node --check server/public-submissions-validation.test.js && node --check server/corporate-content-validation.test.js && node --check server/live-class-auth.test.js && node --check server/live-class-validation.test.js && node --check server/live-recording-storage.test.js && node --check scripts/migrate.js && node --check public/app.js && node --check public/admin.js && node --check public/portal.js && node --check public/classroom.js && node --check public/messages.js && node --check public/collaboration.js && node --check public/corporate.js && node --check public/corporate-content-admin.js && node --check public/submissions-admin.js && tsc --noEmit",
+    "test": "node --test server/location-validation.test.js server/message-validation.test.js server/collaboration-validation.test.js server/live-session-validation.test.js server/course-curriculum.test.js server/document-curriculum.test.js server/gemini-curriculum.test.js server/openai-curriculum.test.js server/public-submissions-validation.test.js server/corporate-content-validation.test.js server/live-class-auth.test.js server/live-class-validation.test.js server/live-recording-storage.test.js",
     "db:migrate": "node scripts/migrate.js"
   },
   "dependencies": {
-    "@aws-sdk/client-s3": "^3.1169.0",
-    "@aws-sdk/s3-request-presigner": "^3.1169.0",
     "cloudinary": "^2.11.0",
     "dotenv": "^16.6.1",
-    "livekit-client": "^2.24.0",
-    "livekit-server-sdk": "^2.19.3",
     "mammoth": "^1.13.0",
+    "mediasoup": "^3.32.2",
+    "mediasoup-client": "^3.26.0",
     "next": "^16.4.5",
+    "nodemailer": "^10.6.1",
     "pdfjs-dist": "^4.10.38",
     "pg": "^8.16.3",
     "react": "^19.3.1",
-    "react-dom": "^19.3.1"
+    "react-dom": "^19.3.1",
+    "socket.io": "^4.8.4",
+    "socket.io-client": "^4.8.4"
   },
   "engines": {
     "node": ">=20"

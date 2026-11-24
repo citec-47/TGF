@@ -1,30 +1,9 @@
 import { randomUUID } from "node:crypto";
-import { createWriteStream } from "node:fs";
-import { mkdtemp, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { Readable } from "node:stream";
-import { pipeline } from "node:stream/promises";
-import {
-  DeleteObjectCommand,
-  HeadObjectCommand,
-  GetObjectCommand,
-  S3Client,
-} from "@aws-sdk/client-s3";
+import { rm, stat } from "node:fs/promises";
+import path from "node:path";
 import { v2 as cloudinary } from "cloudinary";
-import {
-  AccessToken,
-  EncodedFileOutput,
-  EncodedFileType,
-  EgressClient,
-  EgressStatus,
-  RoomServiceClient,
-  S3Upload,
-  TrackSource,
-  WebhookReceiver,
-} from "livekit-server-sdk";
+import nodemailer from "nodemailer";
 import type { Pool, PoolClient, QueryResultRow } from "pg";
-import { after } from "next/server";
 import {
   canonicalConversationUsers,
   validateDashboardTheme,
@@ -35,6 +14,7 @@ import {
   canInitiallyPublish,
   isJoinWindowOpen,
 } from "./live-session-validation.js";
+import { assembleRecordingPartFile, saveRecordingChunkFile } from "./live-recording-storage.js";
 import { validateMessageAttachment } from "./message-validation.js";
 
 interface CollaborationAccount {
@@ -1261,11 +1241,13 @@ async function listRecordings(
   const result = await services.pool.query(
     `SELECT session.id, session.class_date, session.recording_status,
             session.recording_error, session.started_at,
+            COALESCE(recording.duration_seconds, 0) AS recording_duration_seconds,
             programme.id AS programme_id, programme.title AS programme_title,
             teacher.id AS teacher_id, teacher.full_name AS teacher_name
      FROM tgf_live_sessions session
      JOIN tgf_programmes programme ON programme.id = session.programme_id
      JOIN tgf_users teacher ON teacher.id = session.teacher_id
+     LEFT JOIN tgf_live_recordings recording ON recording.session_id = session.id
      WHERE (
        $2 = 'administrator' OR
        ($2 = 'teacher' AND session.teacher_id = $1) OR
@@ -1275,6 +1257,7 @@ async function listRecordings(
            AND enrollment.approval_status = 'approved'
        ))
      )
+       AND ($2 <> 'administrator' OR session.recording_hidden_from_admin_at IS NULL)
      ORDER BY session.class_date DESC, COALESCE(session.started_at, session.created_at) DESC
      LIMIT 500`,
     [userId, account.role],
@@ -1290,6 +1273,7 @@ async function listRecordings(
       teacherId: row.teacher_id,
       teacherName: row.teacher_name,
       startsAt: row.started_at,
+      durationSeconds: Number(row.recording_duration_seconds || 0),
       playbackUrl: row.recording_status === "ready"
         ? `/api/collaboration/sessions/${encodeURIComponent(row.id)}/video`
         : "",
@@ -1297,50 +1281,37 @@ async function listRecordings(
   });
 }
 
-function getLiveKitConfig(): {
-  publicUrl: string;
-  apiHost: string;
-  apiKey: string;
-  apiSecret: string;
-} | null {
-  const publicUrl = process.env.LIVEKIT_URL || "";
-  const apiKey = process.env.LIVEKIT_API_KEY || "";
-  const apiSecret = process.env.LIVEKIT_API_SECRET || "";
-  if (!publicUrl || !apiKey || !apiSecret) return null;
-  try {
-    const url = new URL(publicUrl);
-    if (url.protocol !== "wss:" && url.protocol !== "ws:") return null;
-    return {
-      publicUrl,
-      apiHost: publicUrl.replace(/^wss:/, "https:").replace(/^ws:/, "http:").replace(/\/$/, ""),
-      apiKey,
-      apiSecret,
-    };
-  } catch {
-    return null;
+async function dismissFailedRecording(
+  sessionId: string,
+  account: CollaborationAccount,
+  services: CollaborationServices,
+): Promise<Response> {
+  if (account.role !== "administrator") {
+    return services.jsonResponse(403, { error: "An administrator account is required to delete this failed recording." });
   }
-}
-
-function getRecordingStorageConfig(): {
-  bucket: string;
-  region: string;
-  endpoint?: string;
-  accessKeyId: string;
-  secretAccessKey: string;
-} | null {
-  const bucket = process.env.LIVEKIT_RECORDING_S3_BUCKET || "";
-  const region = process.env.LIVEKIT_RECORDING_S3_REGION || "";
-  const accessKeyId = process.env.LIVEKIT_RECORDING_S3_ACCESS_KEY || "";
-  const secretAccessKey = process.env.LIVEKIT_RECORDING_S3_SECRET_KEY || "";
-  const endpoint = process.env.LIVEKIT_RECORDING_S3_ENDPOINT || "";
-  if (!bucket || !region || !accessKeyId || !secretAccessKey) return null;
-  return {
-    bucket,
-    region,
-    endpoint: endpoint || undefined,
-    accessKeyId,
-    secretAccessKey,
-  };
+  const result = await services.pool.query(
+    `UPDATE tgf_live_sessions
+     SET recording_hidden_from_admin_at = NOW(), updated_at = NOW()
+     WHERE id = $1 AND recording_status = 'failed'
+       AND recording_hidden_from_admin_at IS NULL
+     RETURNING id`,
+    [sessionId],
+  );
+  if (!result.rowCount) {
+    const existing = await services.pool.query<{ id: string; recording_status: string }>(
+      "SELECT id, recording_status FROM tgf_live_sessions WHERE id = $1",
+      [sessionId],
+    );
+    if (!existing.rows[0]) {
+      return services.jsonResponse(404, { error: "This failed class recording was not found." });
+    }
+    if (existing.rows[0].recording_status !== "failed") {
+      return services.jsonResponse(409, { error: "Only failed class recordings can be deleted from this list." });
+    }
+    return services.jsonResponse(200, { deleted: true });
+  }
+  await publishCollaborationEvent(services.pool, "administrator", "recording-dismissed", sessionId);
+  return services.jsonResponse(200, { deleted: true });
 }
 
 async function joinScheduledSession(
@@ -1416,10 +1387,6 @@ async function joinScheduledSession(
     return services.jsonResponse(403, { error: "This class can be joined 15 minutes before it starts and until it ends." });
   }
 
-  const config = getLiveKitConfig();
-  if (!config) {
-    return services.jsonResponse(503, { error: "Live classes are not configured on this server yet." });
-  }
   const roomName = `tgf-live-${randomUUID()}`;
   const sessionResult = await services.pool.query<{
     id: string;
@@ -1453,57 +1420,30 @@ async function joinScheduledSession(
       programmeTitle: slot.programme_title,
       teacherName: slot.teacher_name,
       teacherId: slot.teacher_id,
+      started: Boolean(session.started_at),
       startsAt: slot.starts_at,
       endsAt: slot.ends_at,
       serverNow: slot.server_now,
     });
   }
-  const token = await createLiveKitToken(config, account, authorization.role, session.room_name);
   return services.jsonResponse(200, {
-    token,
-    liveKitUrl: config.publicUrl,
+    transport: "mediasoup",
+    socketPath: "/live-class/socket.io",
     role: authorization.role,
     sessionId: session.id,
     roomName: session.room_name,
     programmeTitle: slot.programme_title,
     teacherName: slot.teacher_name,
     teacherId: slot.teacher_id,
+    started: Boolean(session.started_at),
     startsAt: slot.starts_at,
     endsAt: slot.ends_at,
     serverNow: slot.server_now,
   });
 }
 
-async function createLiveKitToken(
-  config: { publicUrl: string; apiHost: string; apiKey: string; apiSecret: string },
-  account: CollaborationAccount,
-  role: "teacher" | "learner" | "administrator",
-  roomName: string,
-): Promise<string> {
-  const token = new AccessToken(config.apiKey, config.apiSecret, {
-    identity: account.id,
-    name: account.full_name,
-    ttl: "2h",
-    metadata: JSON.stringify({ role }),
-  });
-  const canPublish = canInitiallyPublish(role);
-  token.addGrant({
-    roomJoin: true,
-    room: roomName,
-    canSubscribe: true,
-    canPublish,
-    canPublishData: true,
-    canPublishSources: canPublish
-      ? [TrackSource.MICROPHONE, TrackSource.CAMERA, TrackSource.SCREEN_SHARE]
-      : [],
-  });
-  return token.toJwt();
-}
-
-function isRecordingPipelineConfigured(): boolean {
+function isBrowserRecordingConfigured(): boolean {
   return Boolean(
-    getLiveKitConfig() &&
-    getRecordingStorageConfig() &&
     process.env.CLOUDINARY_CLOUD_NAME &&
     process.env.CLOUDINARY_API_KEY &&
     process.env.CLOUDINARY_API_SECRET,
@@ -1714,11 +1654,12 @@ async function listLiveSessions(
     teacher_name: string;
     group_name: string | null;
     started_at: Date | null;
+    ended_at: Date | null;
     invited_count: number;
   }>(
     `SELECT session.id, programme.title AS programme_title,
             teacher.full_name AS teacher_name, live_group.name AS group_name,
-            session.started_at,
+            session.started_at, session.ended_at,
             (SELECT COUNT(*)::int FROM tgf_live_session_invites invite
              WHERE invite.session_id = session.id) AS invited_count
      FROM tgf_live_sessions session
@@ -1730,10 +1671,11 @@ async function listLiveSessions(
      LEFT JOIN tgf_live_class_groups live_group ON live_group.id = session.group_id
      WHERE session.timetable_slot_id IS NULL
        AND session.ended_at IS NULL
-       AND session.created_at >= NOW() - INTERVAL '48 hours'
        AND (
          ($2 = 'teacher' AND session.teacher_id = $1) OR
-         ($2 = 'learner' AND EXISTS (
+         ($2 = 'learner' AND
+          (session.started_at IS NOT NULL OR session.created_at >= NOW() - INTERVAL '48 hours')
+          AND EXISTS (
            SELECT 1
            FROM tgf_live_session_invites invite
            JOIN tgf_enrollments enrollment
@@ -1754,6 +1696,7 @@ async function listLiveSessions(
       teacherName: row.teacher_name,
       groupName: row.group_name,
       startedAt: row.started_at?.toISOString() || null,
+      endedAt: row.ended_at?.toISOString() || null,
       invitedCount: Number(row.invited_count),
     })),
   });
@@ -1772,12 +1715,6 @@ async function createInstantSession(
   if (!isUuid(groupId)) {
     return services.jsonResponse(400, { error: "Choose one of your saved student groups." });
   }
-  if (!isRecordingPipelineConfigured()) {
-    return services.jsonResponse(503, {
-      error: "LiveKit, recording storage, and Cloudinary must be configured before a live class can start.",
-    });
-  }
-
   const sessionId = randomUUID();
   const roomName = `tgf-live-${randomUUID()}`;
   const client = await services.pool.connect();
@@ -1886,13 +1823,12 @@ async function joinInstantSession(
     started_at: Date | null;
     ended_at: Date | null;
     recording_status: string;
-    egress_id: string;
     server_now: Date;
   }>(
     `SELECT session.room_name, session.programme_id, programme.title AS programme_title,
             session.teacher_id, teacher.full_name AS teacher_name,
             session.started_at, session.ended_at, session.recording_status,
-            session.egress_id, NOW() AS server_now
+            NOW() AS server_now
      FROM tgf_live_sessions session
      JOIN tgf_programmes programme ON programme.id = session.programme_id
        AND programme.is_active = TRUE AND programme.deleted_at IS NULL
@@ -1942,10 +1878,10 @@ async function joinInstantSession(
     return services.jsonResponse(authorization.status, { error: message });
   }
   if (authorization.role === "learner" &&
-      (!session.started_at || !session.egress_id || session.recording_status !== "recording")) {
+      (!session.started_at || session.recording_status !== "recording")) {
     if (session.recording_status === "failed") {
       return services.jsonResponse(503, {
-        error: "The tutor could not start the automatic class recording. Please wait for the tutor to resolve it.",
+        error: "The tutor could not start the browser recording. Please wait for the tutor to resolve it.",
       });
     }
     return services.jsonResponse(200, {
@@ -1959,18 +1895,16 @@ async function joinInstantSession(
     });
   }
 
-  const config = getLiveKitConfig();
-  if (!config) return services.jsonResponse(503, { error: "Live classes are not configured on this server yet." });
-  const token = await createLiveKitToken(config, account, authorization.role, session.room_name);
   return services.jsonResponse(200, {
-    token,
-    liveKitUrl: config.publicUrl,
+    transport: "mediasoup",
+    socketPath: "/live-class/socket.io",
     role: authorization.role,
     sessionId,
     roomName: session.room_name,
     programmeTitle: session.programme_title,
     teacherName: session.teacher_name,
     teacherId: session.teacher_id,
+    started: Boolean(session.started_at),
     startsAt: session.started_at?.toISOString() || session.server_now.toISOString(),
     serverNow: session.server_now.toISOString(),
   });
@@ -1981,39 +1915,19 @@ async function beginLiveSession(
   roomName: string,
   services: CollaborationServices,
 ): Promise<Date | null> {
-  const result = await services.pool.query<{ id: string; room_name: string }>(
+  const result = await services.pool.query<{ started_at: Date }>(
     `UPDATE tgf_live_sessions
-     SET recording_status = 'recording', recording_error = '', updated_at = NOW()
+     SET started_at = COALESCE(started_at, NOW()),
+         recording_status = 'recording', recording_error = '', updated_at = NOW()
      WHERE id = $1 AND room_name = $2 AND ended_at IS NULL
-       AND recording_status = 'pending'
-     RETURNING id, room_name`,
+       AND recording_status IN ('pending', 'recording')
+     RETURNING started_at`,
     [sessionId, roomName],
   );
-  if (result.rowCount) {
-    await startClassRecording(sessionId, roomName, services);
-  }
-  const deadline = Date.now() + 15000;
-  while (Date.now() < deadline) {
-    const existing = await services.pool.query<{
-      started_at: Date | null;
-      egress_id: string;
-      recording_status: string;
-    }>(
-      "SELECT started_at, egress_id, recording_status FROM tgf_live_sessions WHERE id = $1",
-      [sessionId],
-    );
-    const current = existing.rows[0];
-    if (!current) return null;
-    if (current.recording_status === "failed") {
-      throw Object.assign(new Error("The automatic recording could not start. This class has not been opened to students."), { status: 503 });
-    }
-    if (current.started_at && current.egress_id && current.recording_status === "recording") {
-      return current.started_at;
-    }
-    if (current.recording_status !== "recording") return null;
-    await new Promise((resolve) => setTimeout(resolve, 250));
-  }
-  throw Object.assign(new Error("The automatic recording is still starting. Try again in a few seconds."), { status: 503 });
+  const startedAt = result.rows[0]?.started_at;
+  if (!startedAt) return null;
+  await publishCollaborationEvent(services.pool, "administrator", "recording-started", sessionId);
+  return startedAt;
 }
 
 async function startLiveSession(
@@ -2030,10 +1944,9 @@ async function startLiveSession(
     started_at: Date | null;
     ended_at: Date | null;
     recording_status: string;
-    egress_id: string;
   }>(
     `SELECT session.room_name, session.teacher_id, session.started_at, session.ended_at,
-            session.recording_status, session.egress_id
+            session.recording_status
      FROM tgf_live_sessions session
      LEFT JOIN tgf_course_timetable_slots slot ON slot.id = session.timetable_slot_id
      LEFT JOIN tgf_course_timetables timetable ON timetable.id = slot.timetable_id
@@ -2047,17 +1960,6 @@ async function startLiveSession(
     return services.jsonResponse(403, { error: "Only the assigned tutor can start this class." });
   }
   if (session.ended_at) return services.jsonResponse(409, { error: "This class has already ended." });
-  const config = getLiveKitConfig();
-  if (!config || !isRecordingPipelineConfigured()) {
-    return services.jsonResponse(503, {
-      error: "LiveKit, recording storage, and Cloudinary must be configured before this class can start.",
-    });
-  }
-  const roomService = new RoomServiceClient(config.apiHost, config.apiKey, config.apiSecret);
-  const participants = await roomService.listParticipants(session.room_name);
-  if (!participants.some((participant) => participant.identity === account.id)) {
-    return services.jsonResponse(409, { error: "Connect to the live room before starting the lesson." });
-  }
   const startedAt = await beginLiveSession(sessionId, session.room_name, services);
   if (!startedAt) {
     return services.jsonResponse(409, { error: "This class could not be started. Please try again." });
@@ -2073,72 +1975,68 @@ async function endLiveSession(
   if (account.role !== "teacher") {
     return services.jsonResponse(403, { error: "Only the assigned tutor can end this class." });
   }
-  const config = getLiveKitConfig();
-  if (!config) return services.jsonResponse(503, { error: "Live class controls are not configured." });
-  let sessionResult = await services.pool.query<{
-    room_name: string;
-    egress_id: string | null;
-    teacher_id: string;
-    recording_status: string;
-  }>(
-    `SELECT session.room_name, session.egress_id, session.teacher_id, session.recording_status
-     FROM tgf_live_sessions session
-     WHERE session.id = $1`,
-    [sessionId],
-  );
-  let session = sessionResult.rows[0];
-  if (!session) return services.jsonResponse(404, { error: "This live class is unavailable." });
-  if (session.teacher_id !== account.id) {
-    return services.jsonResponse(403, { error: "Only the assigned tutor can end this class." });
-  }
-  const recordingStartDeadline = Date.now() + 15000;
-  while (!session.egress_id &&
-         ["pending", "recording"].includes(session.recording_status) &&
-         Date.now() < recordingStartDeadline) {
-    await new Promise((resolve) => setTimeout(resolve, 250));
-    sessionResult = await services.pool.query<{
-      room_name: string;
-      egress_id: string | null;
+  const client = await services.pool.connect();
+  let invitedStudents: string[] = [];
+  try {
+    await client.query("BEGIN");
+    const sessionResult = await client.query<{
       teacher_id: string;
-      recording_status: string;
+      ended_at: Date | null;
     }>(
-      `SELECT session.room_name, session.egress_id, session.teacher_id, session.recording_status
+      `SELECT session.teacher_id, session.ended_at
        FROM tgf_live_sessions session
-       WHERE session.id = $1`,
+       WHERE session.id = $1
+       FOR UPDATE`,
       [sessionId],
     );
-    session = sessionResult.rows[0];
-    if (!session) return services.jsonResponse(404, { error: "This live class is unavailable." });
-  }
-  if (!session.egress_id && ["pending", "recording"].includes(session.recording_status)) {
-    return services.jsonResponse(409, {
-      error: "The automatic recording is still starting. Wait a few seconds, then end the lesson again.",
-    });
-  }
-  await services.pool.query(
-    `UPDATE tgf_live_sessions
-     SET ended_at = COALESCE(ended_at, NOW()), updated_at = NOW()
-     WHERE id = $1`,
-    [sessionId],
-  );
-  const egress = new EgressClient(config.apiHost, config.apiKey, config.apiSecret);
-  const roomService = new RoomServiceClient(config.apiHost, config.apiKey, config.apiSecret);
-  let stopError = "";
-  if (session.egress_id) {
-    try {
-      await egress.stopEgress(session.egress_id);
-    } catch (error) {
-      services.safeLogFailure("LiveKit recording stop", error);
-      stopError = "The lesson ended, but its recording could not be stopped. Please retry.";
+    const session = sessionResult.rows[0];
+    if (!session) {
+      await client.query("ROLLBACK");
+      return services.jsonResponse(404, { error: "This live class is unavailable." });
     }
-  }
-  try {
-    await roomService.deleteRoom(session.room_name);
+    if (session.teacher_id !== account.id) {
+      await client.query("ROLLBACK");
+      return services.jsonResponse(403, { error: "Only the assigned tutor can end this class." });
+    }
+    const inviteResult = await client.query<{ user_id: string }>(
+      "SELECT user_id FROM tgf_live_session_invites WHERE session_id = $1",
+      [sessionId],
+    );
+    invitedStudents = inviteResult.rows.map((row) => row.user_id);
+    if (!session.ended_at) {
+      await client.query(
+        `UPDATE tgf_live_sessions
+         SET ended_at = NOW(),
+             recording_status = CASE
+               WHEN recording_status IN ('recording', 'failed') THEN 'uploading'
+               WHEN recording_status = 'pending' THEN 'failed'
+               ELSE recording_status
+             END,
+             recording_error = CASE
+               WHEN recording_status = 'pending' THEN 'The lesson ended before browser recording started.'
+               WHEN recording_status IN ('recording', 'failed') THEN ''
+               ELSE recording_error
+             END,
+             updated_at = NOW()
+         WHERE id = $1 AND teacher_id = $2`,
+        [sessionId, account.id],
+      );
+    }
+    await client.query(
+      `DELETE FROM tgf_notifications
+       WHERE notification_type = 'live-class-invitation'
+         AND data ->> 'liveSessionId' = $1`,
+      [sessionId],
+    );
+    await client.query("COMMIT");
   } catch (error) {
-    services.safeLogFailure("LiveKit room end", error);
-    stopError = "The lesson ended, but some room participants could not be disconnected. Please retry.";
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
   }
-  if (stopError) return services.jsonResponse(502, { error: stopError });
+  await Promise.all([account.id, ...invitedStudents].map((recipient) =>
+    publishCollaborationEvent(services.pool, recipient, "notification")));
   return services.jsonResponse(200, { ended: true });
 }
 
@@ -2157,17 +2055,10 @@ async function updateParticipantMicrophone(
   if ((participantId !== "all" && !isUuid(participantId)) || typeof allowMicrophone !== "boolean") {
     return services.jsonResponse(400, { error: "Choose a student and whether to allow their microphone." });
   }
-  const sessionQuery = await services.pool.query<{
-    room_name: string;
-    teacher_id: string;
-    programme_id: string;
-  }>(
-    `SELECT session.room_name, session.teacher_id, session.programme_id
-     FROM tgf_live_sessions session
-     LEFT JOIN tgf_course_timetable_slots slot ON slot.id = session.timetable_slot_id
-     LEFT JOIN tgf_course_timetables timetable ON timetable.id = slot.timetable_id
-     WHERE session.id = $1 AND
-       (session.timetable_slot_id IS NULL OR timetable.status = 'approved')`,
+  const sessionQuery = await services.pool.query<{ teacher_id: string; programme_id: string }>(
+    `SELECT teacher_id, programme_id
+     FROM tgf_live_sessions
+     WHERE id = $1`,
     [sessionId],
   );
   const session = sessionQuery.rows[0];
@@ -2175,38 +2066,26 @@ async function updateParticipantMicrophone(
   if (account.role === "teacher" && account.id !== session.teacher_id) {
     return services.jsonResponse(403, { error: "Only the assigned tutor can manage this class." });
   }
-  const config = getLiveKitConfig();
-  if (!config) return services.jsonResponse(503, { error: "Live class controls are not configured." });
-  const roomService = new RoomServiceClient(config.apiHost, config.apiKey, config.apiSecret);
-  const participants = await roomService.listParticipants(session.room_name);
-  const candidates = participants.filter((participant) =>
-    participant.identity !== session.teacher_id &&
-    (participantId === "all" || participant.identity === participantId));
-  if (participantId !== "all" && !candidates.length) {
-    return services.jsonResponse(404, { error: "This student is not currently in the class." });
-  }
   let updated = 0;
-  for (const student of candidates) {
-    if (!isUuid(student.identity)) continue;
+  if (participantId === "all") {
+    updated = await services.pool.query(
+      `SELECT COUNT(*)::int AS count
+       FROM tgf_enrollments
+       WHERE programme_id = $1 AND approval_status = 'approved'`,
+      [session.programme_id],
+    ).then((result) => Number(result.rows[0]?.count || 0));
+  } else {
+    if (!isUuid(participantId)) {
+      return services.jsonResponse(400, { error: "Choose a valid student." });
+    }
     const enrolled = await services.pool.query(
       `SELECT 1 FROM tgf_enrollments
        WHERE user_id = $1 AND programme_id = $2 AND approval_status = 'approved'`,
-      [student.identity, session.programme_id],
+      [participantId, session.programme_id],
     );
     if (!enrolled.rowCount) {
-      if (participantId !== "all") {
-        return services.jsonResponse(403, { error: "Only an enrolled student can be unmuted." });
-      }
-      continue;
+      return services.jsonResponse(403, { error: "Only an enrolled student can be unmuted." });
     }
-    await roomService.updateParticipant(session.room_name, student.identity, {
-      permission: {
-        canSubscribe: true,
-        canPublish: allowMicrophone,
-        canPublishData: true,
-        canPublishSources: allowMicrophone ? [TrackSource.MICROPHONE] : [],
-      },
-    });
     updated += 1;
   }
   return services.jsonResponse(200, { updated });
@@ -2281,129 +2160,10 @@ async function markParticipantLeft(
 }
 
 async function handleLiveKitWebhook(
-  request: Request,
+  _request: Request,
   services: CollaborationServices,
 ): Promise<Response> {
-  const apiKey = process.env.LIVEKIT_API_KEY || "";
-  const apiSecret = process.env.LIVEKIT_API_SECRET || "";
-  if (!apiKey || !apiSecret) {
-    return services.jsonResponse(503, { error: "Live class webhooks are not configured." });
-  }
-  const contentLength = Number(request.headers.get("content-length") || 0);
-  if (contentLength > 2 * 1024 * 1024) {
-    return services.jsonResponse(413, { error: "The webhook payload is too large." });
-  }
-  const rawBody = await request.text();
-  let event;
-  try {
-    event = await new WebhookReceiver(apiKey, apiSecret).receive(
-      rawBody,
-      request.headers.get("authorization") || undefined,
-    );
-  } catch (error) {
-    services.safeLogFailure("LiveKit webhook verification", error);
-    return services.jsonResponse(401, { error: "The live class webhook signature is invalid." });
-  }
-  const roomName = event.room?.name || "";
-  const participantId = event.participant?.identity || "";
-  if (event.event === "participant_joined" && roomName && participantId) {
-    await markParticipantJoined(roomName, participantId, services);
-  } else if (event.event === "participant_left" && roomName && participantId) {
-    await markParticipantLeft(roomName, participantId, services);
-  } else if (event.event === "room_finished" && roomName) {
-    await services.pool.query(
-      `UPDATE tgf_live_sessions SET ended_at = COALESCE(ended_at, NOW()), updated_at = NOW()
-       WHERE room_name = $1`,
-      [roomName],
-    );
-  } else if (event.event === "egress_ended" && event.egressInfo?.roomName) {
-    const egressInfo = event.egressInfo;
-    const session = await services.pool.query<{ id: string }>(
-      "SELECT id FROM tgf_live_sessions WHERE room_name = $1",
-      [egressInfo.roomName],
-    );
-    const sessionId = session.rows[0]?.id;
-    if (sessionId) {
-      if (egressInfo.status === EgressStatus.EGRESS_COMPLETE) {
-        await queueRecordingProcessing(sessionId, services);
-        after(async () => processRecordingJob(sessionId, services));
-      } else {
-        await failRecording(
-          sessionId,
-          (egressInfo.error || "LiveKit could not finish the recording.").slice(0, 1000),
-          services,
-        );
-      }
-    }
-  }
-  return services.jsonResponse(200, { received: true });
-}
-
-async function startClassRecording(
-  sessionId: string,
-  roomName: string,
-  services: CollaborationServices,
-): Promise<void> {
-  const config = getLiveKitConfig();
-  const storage = getRecordingStorageConfig();
-  if (!config || !storage) {
-    await failRecording(sessionId, "LiveKit recording storage is not configured.", services);
-    throw Object.assign(new Error("LiveKit recording storage is not configured."), { status: 503 });
-  }
-  const egress = new EgressClient(config.apiHost, config.apiKey, config.apiSecret);
-  let egressId = "";
-  try {
-    const output = new EncodedFileOutput({
-      fileType: EncodedFileType.MP4,
-      filepath: recordingObjectKey(sessionId),
-      output: {
-        case: "s3",
-        value: new S3Upload({
-          accessKey: storage.accessKeyId,
-          secret: storage.secretAccessKey,
-          region: storage.region,
-          endpoint: storage.endpoint || "",
-          bucket: storage.bucket,
-          forcePathStyle: Boolean(storage.endpoint),
-        }),
-      },
-    });
-    const result = await egress.startRoomCompositeEgress(roomName, { file: output }, {
-      layout: "grid",
-    });
-    if (!result.egressId) {
-      throw new Error("LiveKit did not return a recording job identifier.");
-    }
-    egressId = result.egressId;
-    const saved = await services.pool.query<{ started_at: Date }>(
-      `UPDATE tgf_live_sessions
-       SET egress_id = $2, started_at = COALESCE(started_at, NOW()),
-           recording_error = '', updated_at = NOW()
-       WHERE id = $1 AND recording_status = 'recording' AND ended_at IS NULL
-       RETURNING started_at`,
-      [sessionId, result.egressId],
-    );
-    if (!saved.rowCount) throw new Error("The live session closed before its recording could start.");
-    await publishCollaborationEvent(services.pool, "administrator", "recording-started", sessionId);
-  } catch (error) {
-    services.safeLogFailure("LiveKit recording start", error);
-    if (egressId) {
-      try {
-        await egress.stopEgress(egressId);
-      } catch (stopError) {
-        services.safeLogFailure("LiveKit failed-start cleanup", stopError);
-      }
-    }
-    await failRecording(sessionId, "LiveKit could not start the automatic recording.", services);
-    throw Object.assign(
-      new Error("The automatic recording could not start. This class has not been opened to students."),
-      { status: 503 },
-    );
-  }
-}
-
-function recordingObjectKey(sessionId: string): string {
-  return `tgfvp/recordings/${sessionId}.mp4`;
+  return services.jsonResponse(410, { error: "LiveKit webhooks are not used by the mediasoup live-class server." });
 }
 
 async function failRecording(
@@ -2424,29 +2184,6 @@ async function failRecording(
     "A class recording failed",
     reason,
     { sessionId },
-  );
-}
-
-async function queueRecordingProcessing(
-  sessionId: string,
-  services: CollaborationServices,
-): Promise<void> {
-  const session = await services.pool.query(
-    `UPDATE tgf_live_sessions
-     SET recording_status = 'processing', recording_error = '', updated_at = NOW()
-     WHERE id = $1 AND recording_status IN ('recording', 'processing', 'failed')
-     RETURNING id`,
-    [sessionId],
-  );
-  if (!session.rowCount) return;
-  await services.pool.query(
-    `INSERT INTO tgf_live_recording_jobs (session_id, status, attempts, available_at, locked_at, last_error)
-     VALUES ($1, 'queued', 0, NOW(), NULL, '')
-     ON CONFLICT (session_id) DO UPDATE SET
-       status = 'queued', attempts = 0, available_at = NOW(), locked_at = NULL,
-       last_error = '', updated_at = NOW()
-     WHERE tgf_live_recording_jobs.status <> 'complete'`,
-    [sessionId],
   );
 }
 
@@ -2540,247 +2277,196 @@ async function distributeCompletedRecording(
   );
 }
 
-async function uploadCompletedRecording(
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function parsePrivateCloudinaryRecording(
+  value: unknown,
+  expectedPublicId: string,
+): { secureUrl: string; format: "mp4" | "webm" } | null {
+  if (!isRecord(value)) return null;
+  const format = typeof value.format === "string" ? value.format.toLowerCase() : "";
+  if (value.public_id !== expectedPublicId ||
+      value.resource_type !== "video" ||
+      value.type !== "authenticated" ||
+      typeof value.secure_url !== "string" ||
+      typeof value.bytes !== "number" ||
+      value.bytes <= 0 ||
+      (format !== "mp4" && format !== "webm")) {
+    return null;
+  }
+  try {
+    const secureUrl = new URL(value.secure_url);
+    if (secureUrl.protocol !== "https:") return null;
+  } catch {
+    return null;
+  }
+  return {
+    secureUrl: value.secure_url,
+    format,
+  };
+}
+
+async function createBrowserRecordingSignature(
   sessionId: string,
+  account: CollaborationAccount,
   services: CollaborationServices,
-): Promise<void> {
-  const storage = getRecordingStorageConfig();
+): Promise<Response> {
+  if (account.role !== "teacher") {
+    return services.jsonResponse(403, { error: "Only the assigned tutor can upload this recording." });
+  }
+  const session = await services.pool.query<{
+    teacher_id: string;
+    ended_at: Date | null;
+    recording_status: string;
+  }>(
+    `SELECT teacher_id, ended_at, recording_status
+     FROM tgf_live_sessions WHERE id = $1`,
+    [sessionId],
+  );
+  const row = session.rows[0];
+  if (!row) return services.jsonResponse(404, { error: "This class recording was not found." });
+  if (row.teacher_id !== account.id) {
+    return services.jsonResponse(403, { error: "Only the assigned tutor can upload this recording." });
+  }
+  if (!row.ended_at || !["uploading", "failed"].includes(row.recording_status)) {
+    return services.jsonResponse(409, { error: "This class is not ready to accept a browser recording." });
+  }
+  if (!isBrowserRecordingConfigured()) {
+    return services.jsonResponse(503, { error: "Cloudinary recording storage is not configured." });
+  }
   const cloudName = process.env.CLOUDINARY_CLOUD_NAME || "";
   const apiKey = process.env.CLOUDINARY_API_KEY || "";
   const apiSecret = process.env.CLOUDINARY_API_SECRET || "";
-  const session = await services.pool.query<{
+  const publicId = `tgfvp/recordings/${sessionId}`;
+  const timestamp = String(Math.floor(Date.now() / 1000));
+  const parameters = {
+    overwrite: "true",
+    public_id: publicId,
+    timestamp,
+    type: "authenticated",
+  };
+  return services.jsonResponse(200, {
+    apiKey,
+    cloudName,
+    overwrite: parameters.overwrite,
+    publicId,
+    signature: services.cloudinaryParameterSignature(parameters),
+    timestamp,
+    type: parameters.type,
+  });
+}
+
+async function completeBrowserRecording(
+  sessionId: string,
+  account: CollaborationAccount,
+  services: CollaborationServices,
+): Promise<Response> {
+  if (account.role !== "teacher") {
+    return services.jsonResponse(403, { error: "Only the assigned tutor can complete this recording." });
+  }
+  const sessionResult = await services.pool.query<{
     programme_id: string;
     teacher_id: string;
     programme_title: string;
     teacher_name: string;
     recording_status: string;
-    recording_url: string;
-    cloudinary_public_id: string;
+    ended_at: Date | null;
   }>(
     `SELECT session.programme_id, session.teacher_id,
             programme.title AS programme_title, teacher.full_name AS teacher_name,
-            session.recording_status, session.recording_url, session.cloudinary_public_id
+            session.recording_status, session.ended_at
      FROM tgf_live_sessions session
      JOIN tgf_programmes programme ON programme.id = session.programme_id
      JOIN tgf_users teacher ON teacher.id = session.teacher_id
      WHERE session.id = $1`,
     [sessionId],
   );
-  const row = session.rows[0];
-  if (!row) throw new Error("The class session could not be found for recording processing.");
-  if (row.recording_status === "ready") return;
+  const session = sessionResult.rows[0];
+  if (!session) return services.jsonResponse(404, { error: "This class recording was not found." });
+  if (session.teacher_id !== account.id) {
+    return services.jsonResponse(403, { error: "Only the assigned tutor can complete this recording." });
+  }
+  if (!session.ended_at || !["uploading", "failed", "ready"].includes(session.recording_status)) {
+    return services.jsonResponse(409, { error: "This class is not ready to complete a browser recording." });
+  }
+  if (!isBrowserRecordingConfigured()) {
+    return services.jsonResponse(503, { error: "Cloudinary recording storage is not configured." });
+  }
 
-  const alreadyUploaded = Boolean(row.recording_url && row.cloudinary_public_id);
-  if (!alreadyUploaded) {
-    if (!storage || !cloudName || !apiKey || !apiSecret) {
-      throw new Error("Cloudinary or private recording storage is not configured.");
-    }
-    const transition = await services.pool.query(
-      `UPDATE tgf_live_sessions SET recording_status = 'uploading', updated_at = NOW()
-       WHERE id = $1 AND recording_status IN ('processing', 'failed', 'uploading')
-       RETURNING id`,
-      [sessionId],
-    );
-    if (!transition.rowCount) {
-      throw new Error("The recording is not in a state that can be uploaded.");
-    }
-
-    const s3 = new S3Client({
-      region: storage.region,
-      endpoint: storage.endpoint,
-      forcePathStyle: Boolean(storage.endpoint),
-      credentials: {
-        accessKeyId: storage.accessKeyId,
-        secretAccessKey: storage.secretAccessKey,
-      },
+  const cloudName = process.env.CLOUDINARY_CLOUD_NAME || "";
+  const apiKey = process.env.CLOUDINARY_API_KEY || "";
+  const apiSecret = process.env.CLOUDINARY_API_SECRET || "";
+  const publicId = `tgfvp/recordings/${sessionId}`;
+  cloudinary.config({ cloud_name: cloudName, api_key: apiKey, api_secret: apiSecret, secure: true });
+  let uploaded: { secureUrl: string; format: "mp4" | "webm" } | null;
+  try {
+    const asset: unknown = await cloudinary.api.resource(publicId, {
+      resource_type: "video",
+      type: "authenticated",
     });
-    const temporaryDirectory = await mkdtemp(join(tmpdir(), "tgf-live-recording-"));
-    const temporaryFile = join(temporaryDirectory, `${sessionId}.mp4`);
-    const publicId = `tgfvp/recordings/${sessionId}`;
-    try {
-      const object = await s3.send(new GetObjectCommand({
-        Bucket: storage.bucket,
-        Key: recordingObjectKey(sessionId),
-      }));
-      if (!object.Body) throw new Error("The staged recording is empty.");
-      await pipeline(
-        Readable.from(object.Body as AsyncIterable<Uint8Array>),
-        createWriteStream(temporaryFile),
-      );
-      cloudinary.config({
-        cloud_name: cloudName,
-        api_key: apiKey,
-        api_secret: apiSecret,
-        secure: true,
-      });
-      const uploaded = await cloudinary.uploader.upload_large(temporaryFile, {
-        resource_type: "video",
-        public_id: publicId,
-        type: "authenticated",
-        overwrite: true,
-        chunk_size: 20 * 1024 * 1024,
-        timeout: 600000,
-      });
-      if (!("secure_url" in uploaded) || uploaded.public_id !== publicId || uploaded.resource_type !== "video" ||
-          uploaded.type !== "authenticated" || !uploaded.secure_url) {
-        throw new Error("Cloudinary could not verify the uploaded class recording.");
-      }
-      const saved = await services.pool.query(
-        `UPDATE tgf_live_sessions
-         SET recording_status = 'uploaded', recording_url = $2, cloudinary_public_id = $3,
-             recording_error = '', updated_at = NOW()
-         WHERE id = $1`,
-        [sessionId, uploaded.secure_url, publicId],
-      );
-      if (!saved.rowCount) throw new Error("The class session was removed during recording upload.");
-      try {
-        await s3.send(new DeleteObjectCommand({
-          Bucket: storage.bucket,
-          Key: recordingObjectKey(sessionId),
-        }));
-      } catch (error) {
-        services.safeLogFailure("Recording staging cleanup", error);
-      }
-    } finally {
-      s3.destroy();
-      try {
-        await rm(temporaryDirectory, { recursive: true, force: true });
-      } catch (error) {
-        services.safeLogFailure("Recording temporary-file cleanup", error);
-      }
-    }
+    uploaded = parsePrivateCloudinaryRecording(asset, publicId);
+  } catch (error) {
+    services.safeLogFailure("Browser recording verification", error);
+    return services.jsonResponse(503, { error: "Cloudinary could not verify the uploaded recording. Retry the upload." });
+  }
+  if (!uploaded) {
+    return services.jsonResponse(422, { error: "Cloudinary did not return a valid private video recording." });
   }
 
-  await distributeCompletedRecording(sessionId, row, services);
-  await services.pool.query(
-    `UPDATE tgf_live_sessions SET recording_status = 'distributed', updated_at = NOW()
-     WHERE id = $1 AND recording_status IN ('uploaded', 'distributed')`,
-    [sessionId],
+  const saved = await services.pool.query(
+    `UPDATE tgf_live_sessions
+     SET recording_status = 'ready', recording_url = $2, cloudinary_public_id = $3,
+         recording_format = $4, recording_error = '',
+         recording_hidden_from_admin_at = NULL, updated_at = NOW()
+     WHERE id = $1 AND teacher_id = $5 AND ended_at IS NOT NULL
+       AND recording_status IN ('uploading', 'failed', 'ready')
+     RETURNING id`,
+    [sessionId, uploaded.secureUrl, publicId, uploaded.format, account.id],
   );
-  const ready = await services.pool.query(
-    `UPDATE tgf_live_sessions SET recording_status = 'ready', recording_error = '', updated_at = NOW()
-     WHERE id = $1 AND recording_status = 'distributed'`,
-    [sessionId],
-  );
-  if (!ready.rowCount) throw new Error("The recording could not be marked ready after distribution.");
-  await publishCollaborationEvent(services.pool, row.teacher_id, "recording-ready", sessionId);
+  if (!saved.rowCount) {
+    return services.jsonResponse(409, { error: "The class recording could not be saved." });
+  }
+  await distributeCompletedRecording(sessionId, session, services);
+  await publishCollaborationEvent(services.pool, session.teacher_id, "recording-ready", sessionId);
   await publishCollaborationEvent(services.pool, "administrator", "recording-ready", sessionId);
+  return services.jsonResponse(200, { ready: true });
 }
 
-const MAX_RECORDING_JOB_ATTEMPTS = 5;
-
-async function processRecordingJob(
-  sessionId: string,
-  services: CollaborationServices,
-): Promise<void> {
-  for (let attempt = 0; attempt < MAX_RECORDING_JOB_ATTEMPTS; attempt += 1) {
-    const claimed = await services.pool.query<{ attempts: number }>(
-      `UPDATE tgf_live_recording_jobs
-       SET status = 'processing', attempts = attempts + 1, locked_at = NOW(), updated_at = NOW()
-       WHERE session_id = $1
-         AND ((status = 'queued' AND available_at <= NOW()) OR
-              (status = 'processing' AND locked_at < NOW() - INTERVAL '15 minutes'))
-       RETURNING attempts`,
-      [sessionId],
-    );
-    if (!claimed.rowCount) return;
-    try {
-      await uploadCompletedRecording(sessionId, services);
-      await services.pool.query(
-        `UPDATE tgf_live_recording_jobs
-         SET status = 'complete', locked_at = NULL, last_error = '', updated_at = NOW()
-         WHERE session_id = $1`,
-        [sessionId],
-      );
-      return;
-    } catch (error) {
-      services.safeLogFailure("Class recording processing", error);
-      const reason = error instanceof Error ? error.message : "The class recording could not be processed.";
-      const retry = attempt + 1 < MAX_RECORDING_JOB_ATTEMPTS;
-      const retryDelayMs = Math.min(30000, 1000 * (2 ** attempt));
-      await services.pool.query(
-        `UPDATE tgf_live_recording_jobs
-         SET status = $2, available_at = NOW() + ($3::double precision * INTERVAL '1 millisecond'),
-             locked_at = NULL, last_error = $4, updated_at = NOW()
-         WHERE session_id = $1`,
-        [sessionId, retry ? "queued" : "failed", retry ? retryDelayMs : 0, reason.slice(0, 1000)],
-      );
-      await services.pool.query(
-        `UPDATE tgf_live_sessions
-         SET recording_status = $2, recording_error = $3, updated_at = NOW()
-         WHERE id = $1`,
-        [sessionId, retry ? "processing" : "failed", reason.slice(0, 1000)],
-      );
-      if (!retry) {
-        await createNotification(
-          services,
-          "administrator",
-          "recording-failed",
-          "A class recording failed",
-          "A class recording could not be processed after automatic retries. Review it in General Classes.",
-          { sessionId },
-        );
-        return;
-      }
-      await new Promise((resolve) => setTimeout(resolve, retryDelayMs));
-    }
-  }
-}
-
-async function retryFailedRecording(
+async function failBrowserRecording(
   sessionId: string,
   account: CollaborationAccount,
   services: CollaborationServices,
 ): Promise<Response> {
-  if (account.role !== "administrator") {
-    return services.jsonResponse(403, { error: "Only an administrator can retry a class recording." });
+  if (account.role !== "teacher") {
+    return services.jsonResponse(403, { error: "Only the assigned tutor can report this recording." });
   }
-  const session = await services.pool.query<{ recording_status: string }>(
-    "SELECT recording_status FROM tgf_live_sessions WHERE id = $1",
+  const session = await services.pool.query<{
+    teacher_id: string;
+    ended_at: Date | null;
+    recording_status: string;
+  }>(
+    `SELECT teacher_id, ended_at, recording_status
+     FROM tgf_live_sessions WHERE id = $1`,
     [sessionId],
   );
-  if (!session.rowCount) return services.jsonResponse(404, { error: "This class recording was not found." });
-  if (session.rows[0].recording_status !== "failed") {
-    return services.jsonResponse(409, { error: "Only a failed recording can be retried." });
+  const row = session.rows[0];
+  if (!row) return services.jsonResponse(404, { error: "This class recording was not found." });
+  if (row.teacher_id !== account.id) {
+    return services.jsonResponse(403, { error: "Only the assigned tutor can report this recording." });
   }
-  const storage = getRecordingStorageConfig();
-  if (!storage || !process.env.CLOUDINARY_CLOUD_NAME ||
-      !process.env.CLOUDINARY_API_KEY || !process.env.CLOUDINARY_API_SECRET) {
-    return services.jsonResponse(503, { error: "Cloudinary or private recording storage is not configured." });
+  if (!row.ended_at || row.recording_status === "ready") {
+    return services.jsonResponse(409, { error: "This class recording cannot be marked as failed." });
   }
-  const s3 = new S3Client({
-    region: storage.region,
-    endpoint: storage.endpoint,
-    forcePathStyle: Boolean(storage.endpoint),
-    credentials: {
-      accessKeyId: storage.accessKeyId,
-      secretAccessKey: storage.secretAccessKey,
-    },
-  });
-  try {
-    await s3.send(new HeadObjectCommand({
-      Bucket: storage.bucket,
-      Key: recordingObjectKey(sessionId),
-    }));
-  } catch (error) {
-    services.safeLogFailure("Recording retry staging check", error);
-    const statusCode = error && typeof error === "object" &&
-      "$metadata" in error && error.$metadata &&
-      typeof error.$metadata === "object" && "httpStatusCode" in error.$metadata
-      ? error.$metadata.httpStatusCode
-      : undefined;
-    if (statusCode === 404) {
-      return services.jsonResponse(409, {
-        error: "The staged recording is unavailable, so this recording cannot be retried.",
-      });
-    }
-    return services.jsonResponse(503, { error: "The staged recording could not be checked. Try again later." });
-  } finally {
-    s3.destroy();
+  if (row.recording_status !== "failed") {
+    await failRecording(
+      sessionId,
+      "The browser recording upload failed. Retry it from the tutor's live-class page while that page remains open.",
+      services,
+    );
   }
-  await queueRecordingProcessing(sessionId, services);
-  after(async () => processRecordingJob(sessionId, services));
-  return services.jsonResponse(202, { queued: true });
+  return services.jsonResponse(200, { failed: true });
 }
 
 async function servePeerAttachment(
@@ -2866,10 +2552,12 @@ async function serveRecording(
   const userId = account.role === "administrator" ? null : account.id;
   const access = await services.pool.query<{
     public_id: string;
+    format: string;
     programme_id: string;
     teacher_id: string;
   }>(
     `SELECT session.cloudinary_public_id AS public_id,
+            session.recording_format AS format,
             session.programme_id, session.teacher_id
      FROM tgf_live_sessions session
      WHERE session.id = $1 AND session.recording_status = 'ready'
@@ -2887,6 +2575,9 @@ async function serveRecording(
   );
   const recording = access.rows[0];
   if (!recording) return services.jsonResponse(404, { error: "This recording is unavailable for your account." });
+  if (recording.format !== "mp4" && recording.format !== "webm") {
+    return services.jsonResponse(503, { error: "This recording format is not supported." });
+  }
   const cloudName = process.env.CLOUDINARY_CLOUD_NAME || "";
   const apiKey = process.env.CLOUDINARY_API_KEY || "";
   if (!cloudName || !apiKey || !process.env.CLOUDINARY_API_SECRET) {
@@ -2895,7 +2586,7 @@ async function serveRecording(
   const timestamp = String(Math.floor(Date.now() / 1000));
   const parameters = {
     public_id: recording.public_id,
-    format: "mp4",
+    format: recording.format,
     type: "authenticated",
     timestamp,
     expires_at: String(Math.floor(Date.now() / 1000) + 60),
@@ -2918,7 +2609,7 @@ async function serveRecording(
   }
   const responseHeaders = new Headers({
     "Cache-Control": "private, no-store",
-    "Content-Type": "video/mp4",
+    "Content-Type": recording.format === "webm" ? "video/webm" : "video/mp4",
     "X-Content-Type-Options": "nosniff",
   });
   for (const name of ["content-length", "content-range", "accept-ranges"]) {
@@ -2939,6 +2630,15 @@ async function listNotifications(
      FROM tgf_notifications
      WHERE read_at IS NULL
        AND (user_id = $1 OR (target_role = 'administrator' AND $2 = 'administrator'))
+       AND NOT (
+         notification_type = 'live-class-invitation'
+         AND EXISTS (
+           SELECT 1
+           FROM tgf_live_sessions ended_session
+           WHERE ended_session.id::text = tgf_notifications.data ->> 'liveSessionId'
+             AND ended_session.ended_at IS NOT NULL
+         )
+       )
      ORDER BY created_at DESC
      LIMIT 50`,
     [userId, account.role],
@@ -3014,6 +2714,255 @@ async function updateDashboardPreferences(
   return services.jsonResponse(200, { theme: validation.theme });
 }
 
+function getRecordingPartMinutes(): number {
+  const value = Number(process.env.RECORDING_PART_MINUTES || 15);
+  return Number.isInteger(value) && value >= 1 && value <= 60 ? value : 15;
+}
+
+function getRecordingDirectory(sessionId: string): string {
+  const root = path.resolve(process.env.LIVE_CLASS_RECORDING_DIR || "./var/live-recordings");
+  return path.join(root, sessionId);
+}
+
+async function recordingSessionForTeacher(
+  sessionId: string,
+  account: CollaborationAccount,
+  services: CollaborationServices,
+) {
+  if (account.role !== "teacher" || !isUuid(account.id)) {
+    return null;
+  }
+  const result = await services.pool.query<{
+    id: string;
+    teacher_id: string;
+    programme_id: string;
+    course_title: string;
+    class_date: string;
+    started_at: Date;
+  }>(
+    `SELECT session.id, session.teacher_id, session.programme_id,
+            programme.title AS course_title,
+            COALESCE(session.class_date, (NOW() AT TIME ZONE 'Africa/Douala')::date)::text AS class_date,
+            COALESCE(session.started_at, NOW()) AS started_at
+     FROM tgf_live_sessions session
+     JOIN tgf_programmes programme ON programme.id = session.programme_id
+     WHERE session.id = $1 AND session.teacher_id = $2`,
+    [sessionId, account.id],
+  );
+  return result.rows[0] || null;
+}
+
+async function receiveRecordingChunk(
+  request: Request,
+  sessionId: string,
+  account: CollaborationAccount,
+  services: CollaborationServices,
+): Promise<Response> {
+  if (!isUuid(sessionId)) return services.jsonResponse(404, { error: "This live class was not found." });
+  const session = await recordingSessionForTeacher(sessionId, account, services);
+  if (!session) return services.jsonResponse(403, { error: "Only the assigned teacher can upload this recording." });
+  const form = await request.formData();
+  const blob = form.get("chunk");
+  const elapsedSeconds = Number(form.get("elapsedSeconds") || 0);
+  const chunkNumber = Number(form.get("chunkNumber"));
+  if (!(blob instanceof Blob) || blob.size === 0) {
+    return services.jsonResponse(400, { error: "A non-empty recording chunk is required." });
+  }
+  if (!Number.isSafeInteger(chunkNumber) || chunkNumber < 1 || chunkNumber > 1_000_000) {
+    return services.jsonResponse(400, { error: "The recording chunk number is invalid." });
+  }
+  if (!Number.isSafeInteger(elapsedSeconds) || elapsedSeconds < 0 ||
+      elapsedSeconds > getRecordingPartMinutes() * 60 * 100) {
+    return services.jsonResponse(400, { error: "The recording time is invalid." });
+  }
+  const partNumber = Math.max(1, Math.floor(elapsedSeconds / (getRecordingPartMinutes() * 60)) + 1);
+  const directory = getRecordingDirectory(sessionId);
+
+  const recordingResult = await services.pool.query<{ id: string }>(
+    `INSERT INTO tgf_live_recordings
+       (session_id, programme_id, teacher_id, course_title, class_date, started_at, upload_status)
+     VALUES ($1::uuid, $2::uuid, $3::uuid, $4::text, $5::date, $6::timestamptz, 'recording')
+     ON CONFLICT (session_id) DO UPDATE SET updated_at = NOW(), upload_status = 'recording'
+     RETURNING id`,
+    [sessionId, session.programme_id, session.teacher_id, session.course_title,
+      session.class_date, session.started_at],
+  );
+  const recordingId = recordingResult.rows[0]?.id;
+  if (!recordingId) throw new Error("The live recording could not be initialized.");
+
+  await saveRecordingChunkFile(directory, chunkNumber, Buffer.from(await blob.arrayBuffer()));
+
+  await services.pool.query(
+    `INSERT INTO tgf_live_recording_chunks
+       (recording_id, chunk_number, part_number, elapsed_seconds, file_size_bytes)
+     VALUES ($1::uuid, $2::integer, $3::smallint, $4::integer, $5::bigint)
+     ON CONFLICT (recording_id, chunk_number) DO NOTHING`,
+    [recordingId, chunkNumber, partNumber, elapsedSeconds, blob.size],
+  );
+  await services.pool.query(
+    `INSERT INTO tgf_live_recording_parts
+       (recording_id, part_number, part_title, upload_status)
+       SELECT $1::uuid, $2::integer,
+              $3::text || ' - Part ' || $2::integer::text,
+            'pending'
+     WHERE EXISTS (SELECT 1 FROM tgf_live_recordings WHERE id = $1::uuid)
+     ON CONFLICT (recording_id, part_number) DO UPDATE SET updated_at = NOW()`,
+    [recordingId, partNumber, `${session.course_title} - ${session.class_date}`],
+  );
+  return services.jsonResponse(200, { received: true, partNumber, chunkNumber });
+}
+
+async function finalizeRecording(
+  request: Request,
+  sessionId: string,
+  account: CollaborationAccount,
+  services: CollaborationServices,
+): Promise<Response> {
+  if (!isUuid(sessionId)) return services.jsonResponse(404, { error: "This live class was not found." });
+  const session = await recordingSessionForTeacher(sessionId, account, services);
+  if (!session) return services.jsonResponse(403, { error: "Only the assigned teacher can finalize this recording." });
+
+  const lockClient = await services.pool.connect();
+  let lockAcquired = false;
+  try {
+    await lockClient.query("SELECT pg_advisory_lock(hashtextextended($1::text, 0))", [sessionId]);
+    lockAcquired = true;
+    const recordingResult = await services.pool.query<{ id: string; upload_status: string }>(
+      `SELECT id, upload_status FROM tgf_live_recordings WHERE session_id = $1`,
+      [sessionId],
+    );
+    if (recordingResult.rows[0]?.upload_status === "ready") {
+      return services.jsonResponse(200, { uploaded: true, parts: [] });
+    }
+    return await finalizeRecordingParts(sessionId, session, services, recordingResult.rows[0] || null);
+  } finally {
+    try {
+      if (lockAcquired) {
+        await lockClient.query("SELECT pg_advisory_unlock(hashtextextended($1::text, 0))", [sessionId]);
+      }
+    } finally {
+      lockClient.release();
+    }
+  }
+}
+
+async function finalizeRecordingParts(
+  sessionId: string,
+  session: NonNullable<Awaited<ReturnType<typeof recordingSessionForTeacher>>>,
+  services: CollaborationServices,
+  recording: { id: string; upload_status: string } | null,
+): Promise<Response> {
+  if (!recording) {
+    return services.jsonResponse(409, { error: "No recording chunks were received from this class." });
+  }
+  await services.pool.query(
+    `UPDATE tgf_live_recordings
+     SET upload_status = 'uploading', ended_at = NOW(),
+         duration_seconds = GREATEST(duration_seconds, GREATEST(0, FLOOR(EXTRACT(EPOCH FROM (NOW() - started_at)))::integer)),
+         updated_at = NOW()
+     WHERE session_id = $1`,
+    [sessionId],
+  );
+
+  const cloudName = process.env.CLOUDINARY_CLOUD_NAME || "";
+  const apiKey = process.env.CLOUDINARY_API_KEY || "";
+  const apiSecret = process.env.CLOUDINARY_API_SECRET || "";
+  if (!cloudName || !apiKey || !apiSecret) {
+    await services.pool.query(
+      `UPDATE tgf_live_recordings SET upload_status = 'failed',
+         last_error = 'Cloudinary is not configured.', updated_at = NOW()
+       WHERE session_id = $1`,
+      [sessionId],
+    );
+    return services.jsonResponse(503, { error: "Cloudinary is not configured. Recording chunks remain available." });
+  }
+
+  const directory = getRecordingDirectory(sessionId);
+  const recordingId = recording.id;
+  const parts = await services.pool.query<{ part_number: number; part_title: string }>(
+    `SELECT part_number, part_title
+     FROM tgf_live_recording_parts
+     WHERE recording_id = $1
+     ORDER BY part_number`,
+    [recordingId],
+  );
+  const uploadedParts: Array<{ partNumber: number; url: string }> = [];
+  for (const part of parts.rows) {
+    const filePath = path.join(directory, `part-${part.part_number}.webm`);
+    try {
+      const chunks = await services.pool.query<{ chunk_number: number }>(
+        `SELECT chunk_number
+         FROM tgf_live_recording_chunks
+         WHERE recording_id = $1 AND part_number = $2
+         ORDER BY chunk_number`,
+        [recordingId, part.part_number],
+      );
+      if (chunks.rowCount) {
+        await assembleRecordingPartFile(
+          directory,
+          part.part_number,
+          chunks.rows.map((chunk) => chunk.chunk_number),
+        );
+      }
+      const file = await stat(filePath);
+      if (!file.isFile() || file.size === 0) throw new Error("The recording part is empty.");
+      let uploaded: { secure_url?: string; public_id?: string } | null = null;
+      for (let attempt = 0; attempt < 3; attempt += 1) {
+        try {
+          const publicId = `tgfvp/live-classes/${sessionId}/part-${part.part_number}`;
+          uploaded = await cloudinary.uploader.upload_large(filePath, {
+            resource_type: "video",
+            public_id: publicId,
+            overwrite: true,
+            invalidate: true,
+            chunk_size: 5 * 1024 * 1024,
+            filename_override: `${part.part_title}.webm`,
+            tags: ["tgfvp", "live-class", session.course_title],
+          }) as unknown as { secure_url?: string; public_id?: string };
+          break;
+        } catch (uploadError) {
+          if (attempt === 2) throw uploadError;
+          await new Promise((resolve) => setTimeout(resolve, 750 * (attempt + 1)));
+        }
+      }
+      if (!uploaded?.secure_url) throw new Error("Cloudinary did not return a secure recording URL.");
+      await services.pool.query(
+        `UPDATE tgf_live_recording_parts
+         SET secure_url = $3, cloudinary_public_id = $4, file_size_bytes = $5,
+             upload_status = 'ready', last_error = '', updated_at = NOW()
+         WHERE recording_id = $1 AND part_number = $2`,
+        [recordingId, part.part_number, uploaded.secure_url, uploaded.public_id || "",
+          file.size],
+      );
+      uploadedParts.push({ partNumber: part.part_number, url: uploaded.secure_url });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "The recording part could not be uploaded.";
+      await services.pool.query(
+        `UPDATE tgf_live_recording_parts
+         SET upload_status = 'failed', last_error = $3, updated_at = NOW()
+         WHERE recording_id = $1 AND part_number = $2`,
+        [recordingId, part.part_number, message.slice(0, 1000)],
+      );
+    }
+  }
+
+  const allPartsReady = uploadedParts.length === parts.rows.length;
+  await services.pool.query(
+    `UPDATE tgf_live_recordings
+     SET upload_status = $2, updated_at = NOW(),
+         last_error = CASE WHEN $2 = 'failed' THEN 'One or more recording parts failed to upload.' ELSE '' END
+     WHERE session_id = $1`,
+    [sessionId, allPartsReady ? "ready" : "failed"],
+  );
+
+  if (allPartsReady) {
+    await rm(directory, { recursive: true, force: true });
+  }
+  return services.jsonResponse(allPartsReady ? 200 : 502, allPartsReady
+    ? { uploaded: true, parts: uploadedParts }
+    : { uploaded: false, parts: uploadedParts, error: "One or more recording parts failed to upload." });
+}
+
 export async function handleCollaborationRequest(
   request: Request,
   services: CollaborationServices,
@@ -3038,6 +2987,19 @@ export async function handleCollaborationRequest(
     const account = await services.getAccountForSession(request);
     if (!isActiveAccount(account)) {
       return services.jsonResponse(401, { error: "Sign in with an active account to continue." });
+    }
+
+    if (segments.length === 5 &&
+        segments.slice(0, 3).join("/") === "api/collaboration/sessions" &&
+        segments[4] === "recording-chunk" &&
+        request.method === "POST") {
+      return await receiveRecordingChunk(request, segments[3], account, services);
+    }
+    if (segments.length === 5 &&
+        segments.slice(0, 3).join("/") === "api/collaboration/sessions" &&
+        segments[4] === "recording-finalize" &&
+        request.method === "POST") {
+      return await finalizeRecording(request, segments[3], account, services);
     }
 
     if (pathname === "/api/collaboration/events" && request.method === "GET") {
@@ -3092,6 +3054,17 @@ export async function handleCollaborationRequest(
     if (pathname === "/api/collaboration/recordings" && request.method === "GET") {
       return await listRecordings(account, services);
     }
+    if (segments.length === 4 &&
+        segments.slice(0, 3).join("/") === "api/collaboration/recordings" &&
+        request.method === "DELETE") {
+      if (!services.hasSameOrigin(request)) {
+        return services.jsonResponse(403, { error: "This request must come from the TGFVP website." });
+      }
+      if (!isUuid(segments[3])) {
+        return services.jsonResponse(404, { error: "This failed class recording was not found." });
+      }
+      return await dismissFailedRecording(segments[3], account, services);
+    }
     if (pathname === "/api/collaboration/notifications" && request.method === "GET") {
       return await listNotifications(account, services);
     }
@@ -3136,15 +3109,27 @@ export async function handleCollaborationRequest(
     }
     if (segments.length === 5 &&
         segments.slice(0, 3).join("/") === "api/collaboration/sessions" &&
-        segments[4] === "end" && request.method === "POST") {
+        segments[4] === "recording-signature" && request.method === "POST") {
       if (!isUuid(segments[3])) return services.jsonResponse(404, { error: "This live class was not found." });
-      return await endLiveSession(segments[3], account, services);
+      return await createBrowserRecordingSignature(segments[3], account, services);
     }
     if (segments.length === 5 &&
         segments.slice(0, 3).join("/") === "api/collaboration/sessions" &&
-        segments[4] === "retry-recording" && request.method === "POST") {
-      if (!isUuid(segments[3])) return services.jsonResponse(404, { error: "This class recording was not found." });
-      return await retryFailedRecording(segments[3], account, services);
+        segments[4] === "recording-complete" && request.method === "POST") {
+      if (!isUuid(segments[3])) return services.jsonResponse(404, { error: "This live class was not found." });
+      return await completeBrowserRecording(segments[3], account, services);
+    }
+    if (segments.length === 5 &&
+        segments.slice(0, 3).join("/") === "api/collaboration/sessions" &&
+        segments[4] === "recording-failed" && request.method === "POST") {
+      if (!isUuid(segments[3])) return services.jsonResponse(404, { error: "This live class was not found." });
+      return await failBrowserRecording(segments[3], account, services);
+    }
+    if (segments.length === 5 &&
+        segments.slice(0, 3).join("/") === "api/collaboration/sessions" &&
+        segments[4] === "end" && request.method === "POST") {
+      if (!isUuid(segments[3])) return services.jsonResponse(404, { error: "This live class was not found." });
+      return await endLiveSession(segments[3], account, services);
     }
     if (segments.length === 5 &&
         segments.slice(0, 3).join("/") === "api/collaboration/sessions" &&

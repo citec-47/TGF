@@ -32,7 +32,6 @@
             aria-label="Switch to dark mode"
             aria-pressed="false"
             title="Switch to dark mode"
-            hidden
           >
             <svg class="icon-moon" viewBox="0 0 24 24" aria-hidden="true">
               <path d="M20.2 15.4A8.5 8.5 0 0 1 8.6 3.8 8.6 8.6 0 1 0 20.2 15.4Z"></path>
@@ -170,22 +169,26 @@
               </div>
               <p class="admin-message" id="teacher-class-message" role="status" aria-live="polite"></p>
               <form class="admin-form teacher-class-form teacher-go-live-form" id="teacher-go-live" data-collab-go-live>
-                <h3>Go live with a student group</h3>
-                <p class="admin-intro">Create a reusable group from active, approved learners in one of your assigned courses. Only students in the selected group will be invited.</p>
+                <h3>Go live with a group</h3>
+                <p class="admin-intro">Choose a course and saved group. The class opens with your camera and recording started; only that group's eligible learners are invited.</p>
                 <label for="teacher-go-live-course">Course</label>
                 <select id="teacher-go-live-course" data-go-live-course required></select>
                 <label for="teacher-go-live-group">Saved student group</label>
                 <select id="teacher-go-live-group" data-go-live-group required>
-                  <option value="">Choose or create a group</option>
+                  <option value="">Choose a group</option>
                 </select>
-                <label for="teacher-live-group-name">Group name</label>
-                <input id="teacher-live-group-name" data-live-group-name maxlength="80" required>
-                <div class="live-group-members" data-live-group-members role="group" aria-label="Students to include in this group">
-                  <p class="admin-empty">Choose a course to load eligible students.</p>
-                </div>
-                <button class="button button-quiet" data-live-group-save type="button" disabled>Save reusable group</button>
+                <p class="admin-location-subtitle" data-go-live-group-summary>Select a course and group to start.</p>
+                <details class="live-group-editor" data-live-group-editor>
+                  <summary>Create a group or change its members</summary>
+                  <label for="teacher-live-group-name">Group name</label>
+                  <input id="teacher-live-group-name" data-live-group-name maxlength="80" placeholder="e.g. Morning learners">
+                  <div class="live-group-members" data-live-group-members role="group" aria-label="Students to include in this group">
+                    <p class="admin-empty">Choose a course to load eligible students.</p>
+                  </div>
+                  <button class="button button-quiet" data-live-group-save type="button" disabled>Save group</button>
+                </details>
                 <p class="admin-message" data-go-live-status role="status" aria-live="polite"></p>
-                <button class="button button-orange" data-go-live-submit type="submit" disabled>Start live class</button>
+                <button class="button button-orange" data-go-live-submit type="submit" disabled>Go live now</button>
               </form>
               <div class="live-class-list" id="teacher-class-list"></div>
               <form class="admin-form teacher-class-form" id="teacher-class-form">
@@ -321,16 +324,16 @@
                 <div><p class="micro-label">Curriculum workflow</p><h2 id="teacher-course-content-title">Submit course content</h2></div>
                 <span class="student-section-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M5 4h14v16H5zM8 8h8M8 12h8M8 16h5" /></svg></span>
               </div>
-              <p class="admin-intro">Upload the course document for an assigned programme. After administrator review and approval, the platform creates the course modules and their four weekly blocks for the teacher and enrolled learners.</p>
+              <p class="admin-intro">Upload a course document or video for an assigned programme. Videos upload directly to secure storage with live progress. After administrator review and approval, the platform creates the course modules and their four weekly blocks for the teacher and enrolled learners.</p>
               <form class="admin-form teacher-class-form" id="teacher-course-submission-form">
                 <div class="admin-form-grid">
-                  <div><label for="course-submission-title">Course document title</label><input id="course-submission-title" name="title" maxlength="120" required></div>
+                  <div><label for="course-submission-title">Course content title</label><input id="course-submission-title" name="title" maxlength="120" required></div>
                 </div>
-                <label for="course-submission-file">Course document</label>
-                <input id="course-submission-file" name="file" type="file" accept=".pdf,.doc,.docx,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document" required>
-                <p class="admin-field-hint">PDF, DOC or DOCX · up to 10 MB. Your assigned course is selected automatically. Modules and weekly blocks appear after administrator approval.</p>
+                <label for="course-submission-file">Course document or video</label>
+                <input id="course-submission-file" name="file" type="file" accept=".pdf,.doc,.docx,.mp4,.mov,.webm,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,video/mp4,video/quicktime,video/webm" required>
+                <p class="admin-field-hint">PDF, DOC or DOCX · up to 10 MB; MP4, MOV or WebM · up to 100 MB. Your assigned course is selected automatically. Videos upload directly to secure storage; approved course lessons remain when you delete a video source.</p>
                 <p class="admin-message" id="teacher-course-submission-message" role="status" aria-live="polite"></p>
-                <button class="button button-orange" type="submit">Submit course document <span aria-hidden="true">↗</span></button>
+                <button class="button button-orange" type="submit">Submit course content <span aria-hidden="true">↗</span></button>
               </form>
               <div class="teacher-module-list" id="teacher-course-submission-list" aria-live="polite"></div>
             </section>
