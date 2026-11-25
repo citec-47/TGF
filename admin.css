@@ -6506,7 +6506,7 @@
 }
 
 .livekit-layout {
-  grid-template-columns: minmax(280px, 340px) minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr) minmax(280px, 360px);
   gap: 14px;
   margin-top: 14px;
 }
@@ -6554,6 +6554,65 @@
 .livekit-roster h2 span {
   background: #f0e2d4;
   color: #7d4424;
+}
+
+.livekit-attendance-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin: 14px 0 8px;
+  font-size: 0.9rem;
+}
+
+.livekit-attendance-heading span {
+  border-radius: 999px;
+  padding: 2px 8px;
+  background: #f2e4d6;
+  font-size: 0.75rem;
+}
+
+.livekit-attendance-empty {
+  margin: 0;
+  color: var(--admin-ink-soft);
+  font-size: 0.85rem;
+}
+
+.livekit-attendance-list {
+  display: grid;
+  gap: 2px;
+  max-height: 220px;
+  overflow-y: auto;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.livekit-attendance-list li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 4px 10px;
+  padding: 7px 0;
+  border-bottom: 1px solid #eee7df;
+}
+
+.livekit-attendance-list strong {
+  overflow-wrap: anywhere;
+  font-size: 0.85rem;
+}
+
+.livekit-attendance-list small,
+.livekit-attendance-list time {
+  color: var(--admin-ink-soft);
+  font-size: 0.75rem;
+}
+
+.livekit-attendance-list small {
+  text-align: right;
+}
+
+.livekit-attendance-list time {
+  grid-column: 1 / -1;
 }
 
 .livekit-student-row {
@@ -6749,8 +6808,8 @@
 
 .livekit-layout {
   display: grid;
-  grid-template-columns: minmax(280px, 340px) minmax(0, 1fr);
-  grid-template-areas: "sidebar video";
+  grid-template-columns: minmax(0, 1fr) minmax(280px, 360px);
+  grid-template-areas: "video sidebar";
   align-items: start;
   gap: 16px;
 }
@@ -6789,13 +6848,15 @@
 
 .livekit-student-row {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
   gap: 8px;
-  max-height: 220px;
+  max-height: 380px;
   overflow: auto;
 }
 
 .livekit-student-tile {
+  display: grid;
+  gap: 5px;
   min-width: 0;
   border: 1px solid var(--line);
   border-radius: 10px;
@@ -6805,11 +6866,27 @@
   text-align: left;
 }
 
+.livekit-student-video-frame {
+  display: grid;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  overflow: hidden;
+  border-radius: 7px;
+  place-items: center;
+  background: #151714;
+}
+
+.livekit-student-video {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
 .livekit-student-avatar {
   display: grid;
-  width: 38px;
-  height: 38px;
-  margin-bottom: 6px;
+  width: 48px;
+  height: 48px;
+  margin: 0;
   border-radius: 50%;
   place-items: center;
   background: #e2a06f;

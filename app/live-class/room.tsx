@@ -14,6 +14,20 @@ import {
   removeQueuedRecordingChunk,
 } from "./recording-queue";
 
+function StreamVideo({ stream, className }: { stream: MediaStream; className: string }) {
+  return (
+    <video
+      ref={(element) => {
+        if (element && element.srcObject !== stream) element.srcObject = stream;
+      }}
+      className={className}
+      autoPlay
+      playsInline
+      muted
+    />
+  );
+}
+
 interface JoinResponse {
   role?: "teacher" | "learner" | "student" | "administrator";
   sessionId: string;
@@ -87,11 +101,20 @@ interface ParticipantState {
   raisedHand: boolean;
 }
 
+interface SessionAttendee {
+  id: string;
+  name: string;
+  firstJoinedAt: string;
+  attendanceSeconds: number;
+}
+
 interface MediaProducer {
   participantId: string;
   producerId: string;
   kind: "audio" | "video";
   name: string;
+  role: ParticipantState["role"];
+  source?: "camera" | "screen";
 }
 
 interface ChatMessage {
@@ -202,11 +225,21 @@ export default function LiveClassRoom() {
   const classDate = search.get("date") || "";
 
   const socketRef = useRef<Socket | null>(null);
+  const isTeacherRef = useRef(false);
   const deviceRef = useRef<Device | null>(null);
   const sendTransportRef = useRef<any>(null);
   const receiveTransportRef = useRef<any>(null);
   const consumersRef = useRef<Map<string, any>>(new Map());
   const consumingProducerIdsRef = useRef(new Set<string>());
+  const pendingProducersRef = useRef<Map<string, MediaProducer>>(new Map());
+  const consumerVideoMetadataRef = useRef(new Map<string, {
+    participantId: string;
+    role: ParticipantState["role"];
+    source: "camera" | "screen";
+    stream: MediaStream;
+  }>());
+  const participantVideoStreamsRef = useRef(new Map<string, MediaStream>());
+  const remoteTeacherVideoStreamsRef = useRef(new Map<"camera" | "screen", MediaStream>());
   const cameraStreamRef = useRef<MediaStream | null>(null);
   const screenStreamRef = useRef<MediaStream | null>(null);
   const displayedVideoStreamRef = useRef<MediaStream | null>(null);
@@ -251,6 +284,11 @@ export default function LiveClassRoom() {
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [participants, setParticipants] = useState<ParticipantState[]>([]);
+  const [attendees, setAttendees] = useState<SessionAttendee[]>([]);
+  const [participantVideoStreams, setParticipantVideoStreams] = useState<Map<string, MediaStream>>(
+    () => new Map(),
+  );
+  const [localVideoStream, setLocalVideoStream] = useState<MediaStream | null>(null);
   const [micAllowed, setMicAllowed] = useState(false);
   const [cameraOn, setCameraOn] = useState(false);
   const [micOn, setMicOn] = useState(false);
@@ -269,6 +307,15 @@ export default function LiveClassRoom() {
 
   const isTeacher = info?.role === "teacher";
   const isStudent = info?.role === "learner" || info?.role === "student";
+  isTeacherRef.current = isTeacher;
+
+  function updateParticipantVideoStream(participantId: string, stream: MediaStream | null) {
+    const next = new Map(participantVideoStreamsRef.current);
+    if (stream) next.set(participantId, stream);
+    else next.delete(participantId);
+    participantVideoStreamsRef.current = next;
+    setParticipantVideoStreams(next);
+  }
 
   const joinDisplay = useMemo(() => info?.startsAt
     ? new Intl.DateTimeFormat("en-CM", { dateStyle: "full", timeStyle: "short" })
@@ -300,6 +347,29 @@ export default function LiveClassRoom() {
   function removeConsumer(consumerId: string) {
     consumersRef.current.delete(consumerId);
     if (remoteAudioTracksRef.current.delete(consumerId)) refreshRemoteAudio();
+    const metadata = consumerVideoMetadataRef.current.get(consumerId);
+    if (!metadata) return;
+    consumerVideoMetadataRef.current.delete(consumerId);
+
+    let replacement: MediaStream | null = null;
+    for (const candidate of consumerVideoMetadataRef.current.values()) {
+      if (candidate.participantId === metadata.participantId) replacement = candidate.stream;
+    }
+    if (participantVideoStreamsRef.current.get(metadata.participantId) === metadata.stream) {
+      updateParticipantVideoStream(metadata.participantId, replacement);
+    }
+
+    if (metadata.role === "teacher" && remoteTeacherVideoStreamsRef.current.get(metadata.source) === metadata.stream) {
+      let teacherReplacement: MediaStream | null = null;
+      for (const candidate of consumerVideoMetadataRef.current.values()) {
+        if (candidate.role === "teacher" && candidate.source === metadata.source) {
+          teacherReplacement = candidate.stream;
+        }
+      }
+      if (teacherReplacement) remoteTeacherVideoStreamsRef.current.set(metadata.source, teacherReplacement);
+      else remoteTeacherVideoStreamsRef.current.delete(metadata.source);
+      if (!isTeacherRef.current) displayRemoteTeacherVideo();
+    }
   }
 
   function displayVideoStream(stream: MediaStream | null) {
@@ -308,6 +378,22 @@ export default function LiveClassRoom() {
       mediaVideoRef.current.srcObject = stream;
       setHasVideo(Boolean(stream));
     }
+  }
+
+  function displayRemoteTeacherVideo() {
+    displayVideoStream(
+      remoteTeacherVideoStreamsRef.current.get("screen") ||
+      remoteTeacherVideoStreamsRef.current.get("camera") ||
+      null,
+    );
+  }
+
+  function clearRemoteVideoStreams() {
+    participantVideoStreamsRef.current.clear();
+    setParticipantVideoStreams(new Map());
+    consumerVideoMetadataRef.current.clear();
+    remoteTeacherVideoStreamsRef.current.clear();
+    if (!isTeacherRef.current) displayVideoStream(null);
   }
 
   function emitVideoMode(enabled: boolean) {
@@ -378,6 +464,7 @@ export default function LiveClassRoom() {
     } else {
       setHasVideo(false);
     }
+    consumePendingProducers();
     setCameraOn(Boolean(cameraWantedRef.current && cameraStreamRef.current));
     setScreenOn(Boolean(screenStreamRef.current));
     setNotice("Connection stable. Video restored.");
@@ -461,10 +548,13 @@ export default function LiveClassRoom() {
     });
   }
 
-  async function consumeProducer(producerId: string, kind: "audio" | "video") {
+  async function consumeProducer(producer: MediaProducer) {
     const socket = socketRef.current;
-    if (!socket || !deviceRef.current) return;
-    if (kind === "video" && audioOnlyRef.current) return;
+    if (!socket || !deviceRef.current || (producer.kind === "video" && audioOnlyRef.current)) {
+      pendingProducersRef.current.set(producer.producerId, producer);
+      return;
+    }
+    const { producerId, kind } = producer;
     if (consumingProducerIdsRef.current.has(producerId) ||
         [...consumersRef.current.values()].some((consumer) => consumer.producerId === producerId)) return;
     consumingProducerIdsRef.current.add(producerId);
@@ -514,10 +604,22 @@ export default function LiveClassRoom() {
       });
       consumersRef.current.set(consumer.id, consumer);
       consumer.on("transportclose", () => removeConsumer(consumer.id));
+      consumer.on("producerclose", () => removeConsumer(consumer.id));
       consumer.on("trackended", () => removeConsumer(consumer.id));
       const stream = new MediaStream([consumer.track]);
       if (response.params.kind === "video") {
-        displayVideoStream(stream);
+        const source = producer.source === "screen" ? "screen" : "camera";
+        consumerVideoMetadataRef.current.set(consumer.id, {
+          participantId: producer.participantId,
+          role: producer.role,
+          source,
+          stream,
+        });
+        updateParticipantVideoStream(producer.participantId, stream);
+        if (producer.role === "teacher" && !isTeacherRef.current) {
+          remoteTeacherVideoStreamsRef.current.set(source, stream);
+          displayRemoteTeacherVideo();
+        }
         if (audioOnlyRef.current) consumer.pause();
       }
       if (response.params.kind === "audio") {
@@ -534,6 +636,18 @@ export default function LiveClassRoom() {
       }
     } finally {
       consumingProducerIdsRef.current.delete(producerId);
+    }
+  }
+
+  function consumePendingProducers() {
+    if (!deviceRef.current) return;
+    const pending = [...pendingProducersRef.current.values()];
+    for (const producer of pending) {
+      if (producer.kind === "video" && audioOnlyRef.current) continue;
+      pendingProducersRef.current.delete(producer.producerId);
+      void consumeProducer(producer).catch((reason) => {
+        setError(reason instanceof Error ? reason.message : "Remote media could not be received.");
+      });
     }
   }
 
@@ -560,12 +674,13 @@ export default function LiveClassRoom() {
         errback(transportError instanceof Error ? transportError : new Error("Transport connection failed."));
       }
     });
-    transport.on("produce", async ({ kind, rtpParameters }: any, callback: (data: { id: string }) => void, errback: (error: Error) => void) => {
+    transport.on("produce", async ({ kind, rtpParameters, appData }: any, callback: (data: { id: string }) => void, errback: (error: Error) => void) => {
       try {
         const response = await socketRequest<any>("live-class:produce", {
           transportId: transport.id,
           kind,
           rtpParameters,
+          source: appData?.source,
         });
         if (!response.ok) throw new Error(response.error);
         callback({ id: response.producerId });
@@ -607,7 +722,8 @@ export default function LiveClassRoom() {
     const videoTrack = cameraStreamRef.current.getVideoTracks()[0];
     cameraWantedRef.current = true;
     videoTrack.enabled = !audioOnlyRef.current;
-    displayVideoStream(cameraStreamRef.current);
+    setLocalVideoStream(cameraStreamRef.current);
+    if (isTeacherRef.current) displayVideoStream(cameraStreamRef.current);
     if (deviceRef.current && sendTransportRef.current) {
       const transport = sendTransportRef.current;
       if (!producerRef.current.camera) {
@@ -615,6 +731,7 @@ export default function LiveClassRoom() {
           track: videoTrack,
           encodings: [{ maxBitrate: 500_000 }],
           codecOptions: { videoGoogleStartBitrate: 300 },
+          appData: { source: "camera" },
         });
       }
       if (audioOnlyRef.current) {
@@ -689,7 +806,8 @@ export default function LiveClassRoom() {
         cameraWantedRef.current = false;
         await producerRef.current.camera?.pause();
         cameraStreamRef.current?.getVideoTracks().forEach((track) => track.enabled = false);
-        if (displayedVideoStreamRef.current === cameraStreamRef.current) displayVideoStream(null);
+        setLocalVideoStream(null);
+        if (isTeacherRef.current && displayedVideoStreamRef.current === cameraStreamRef.current) displayVideoStream(null);
         setCameraOn(false);
       } else {
         cameraWantedRef.current = true;
@@ -709,7 +827,10 @@ export default function LiveClassRoom() {
       screenStreamRef.current = stream;
       const track = stream.getVideoTracks()[0];
       if (deviceRef.current && sendTransportRef.current) {
-        producerRef.current.screen = await sendTransportRef.current.produce({ track });
+        producerRef.current.screen = await sendTransportRef.current.produce({
+          track,
+          appData: { source: "screen" },
+        });
         if (audioOnlyRef.current) {
           track.enabled = false;
           await producerRef.current.screen.pause();
@@ -1128,6 +1249,9 @@ export default function LiveClassRoom() {
     if (remoteAudioRef.current) remoteAudioRef.current.srcObject = null;
     remoteAudioTracksRef.current.clear();
     displayedVideoStreamRef.current = null;
+    pendingProducersRef.current.clear();
+    clearRemoteVideoStreams();
+    setLocalVideoStream(null);
     setCameraOn(false);
     setHasVideo(false);
     setScreenOn(false);
@@ -1182,6 +1306,7 @@ export default function LiveClassRoom() {
           : `/api/collaboration/sessions/${encodeURIComponent(slotId)}/join`;
         const result = await requestLiveJoin(joinUrl, liveSessionId ? {} : { classDate });
         if (!active) return;
+        isTeacherRef.current = result.role === "teacher";
         setInfo(result);
         setStarted(Boolean(result.started));
         if (cameraWantedRef.current) {
@@ -1244,8 +1369,10 @@ export default function LiveClassRoom() {
           receiveTransportRef.current = null;
           consumersRef.current.clear();
           consumingProducerIdsRef.current.clear();
+          pendingProducersRef.current.clear();
           remoteAudioTracksRef.current.clear();
           refreshRemoteAudio();
+          clearRemoteVideoStreams();
           producerRef.current = {};
         });
         socket.io.on("reconnect_attempt", () => {
@@ -1269,9 +1396,10 @@ export default function LiveClassRoom() {
               return;
             }
             setParticipants(rejoin.participants);
+            setAttendees(rejoin.attendees || []);
             setStarted(rejoin.started);
             for (const producer of rejoin.producers || []) {
-              void consumeProducer(producer.producerId, producer.kind).catch((reason) => {
+              void consumeProducer(producer).catch((reason) => {
                 setError(reason instanceof Error ? reason.message : "Remote media could not be restored.");
               });
             }
@@ -1307,8 +1435,13 @@ export default function LiveClassRoom() {
             const next = previous.filter((item) => item.id !== participant.id);
             return [...next, participant];
           });
+          if (participant.role === "teacher" && !isTeacherRef.current) {
+            if (participant.cameraOn) displayRemoteTeacherVideo();
+            else displayVideoStream(null);
+          }
         });
         socket.on("live-class:participants", setParticipants);
+        socket.on("live-class:attendees", setAttendees);
         socket.on("live-class:started", () => {
           setEnded(false);
           setStarted(true);
@@ -1322,7 +1455,7 @@ export default function LiveClassRoom() {
           setChatMessages((previous) => [...previous, payload]);
         });
         socket.on("live-class:new-producer", (producer: MediaProducer) => {
-          void consumeProducer(producer.producerId, producer.kind).catch((reason) => {
+          void consumeProducer(producer).catch((reason) => {
             setError(reason instanceof Error ? reason.message : "Remote media could not be received.");
           });
         });
@@ -1342,9 +1475,11 @@ export default function LiveClassRoom() {
         const device = new Device();
         await device.load({ routerRtpCapabilities: ack.rtcCapabilities });
         deviceRef.current = device;
+        consumePendingProducers();
         setParticipants(ack.participants);
+        setAttendees(ack.attendees || []);
         for (const producer of ack.producers || []) {
-          void consumeProducer(producer.producerId, producer.kind).catch((reason) => {
+          void consumeProducer(producer).catch((reason) => {
             setError(reason instanceof Error ? reason.message : "Remote media could not be received.");
           });
         }
@@ -1573,7 +1708,7 @@ export default function LiveClassRoom() {
 
       {!ended && <div className="livekit-layout">
         <section className="livekit-main-view" aria-label="Teacher main view">
-          <video ref={mediaVideoRef} className="livekit-main-video" autoPlay playsInline muted={isTeacher} />
+          <video ref={mediaVideoRef} className="livekit-main-video" autoPlay playsInline muted />
           <audio ref={remoteAudioRef} autoPlay aria-hidden="true" />
           {audioOnly && <div className="livekit-main-placeholder">
             <span>Audio-only mode while the connection recovers</span>
@@ -1584,28 +1719,61 @@ export default function LiveClassRoom() {
         </section>
         <aside className="livekit-sidebar">
           <section className="livekit-roster" aria-label="Class participants">
-            <h2>In class <span>{participants.length}</span></h2>
+            <h2>Students in class <span>{participants.filter((participant) => participant.role === "student").length}</span></h2>
             <div className="livekit-student-row">
-              {participants.filter((participant) => participant.role !== "teacher").map((participant) => (
-                <button
-                  type="button"
-                  className="livekit-student-tile"
-                  key={participant.id}
-                  onClick={() => isTeacher && void setMicrophone(participant.id, !participant.micAllowed)}
-                  title={isTeacher ? (participant.micAllowed ? "Mute student" : "Unmute student") : participant.name}
-                >
-                  <ProfileAvatar
-                    className="livekit-student-avatar"
-                    name={participant.name}
-                    photoUrl={participant.profilePhotoUrl}
-                    seed={participant.id}
-                  />
-                  <strong>{participant.name}</strong>
-                  <small>{participant.micAllowed ? "Speaking allowed" : "Muted"}</small>
-                  {participant.raisedHand && <small className="livekit-hand">Hand raised</small>}
-                </button>
-              ))}
+              {participants.filter((participant) => participant.role === "student").map((participant) => {
+                const isSelf = participant.id === selfProfile.id;
+                const videoStream = isSelf
+                  ? localVideoStream
+                  : participantVideoStreams.get(participant.id);
+                const videoOn = isSelf ? cameraOn : participant.cameraOn;
+                return (
+                  <button
+                    type="button"
+                    className="livekit-student-tile"
+                    key={participant.id}
+                    onClick={() => isTeacher && void setMicrophone(participant.id, !participant.micAllowed)}
+                    title={isTeacher ? (participant.micAllowed ? "Mute student" : "Unmute student") : participant.name}
+                  >
+                    <div className="livekit-student-video-frame">
+                      {!audioOnly && videoOn && videoStream
+                        ? <StreamVideo stream={videoStream} className="livekit-student-video" />
+                        : <ProfileAvatar
+                          className="livekit-student-avatar"
+                          name={participant.name}
+                          photoUrl={participant.profilePhotoUrl}
+                          seed={participant.id}
+                        />}
+                    </div>
+                    <strong>{participant.name}</strong>
+                    <small>{audioOnly ? "Video paused" : videoOn ? "Camera on" : "Camera off"}</small>
+                    <small>{participant.micAllowed ? "Speaking allowed" : "Muted"}</small>
+                    {participant.raisedHand && <small className="livekit-hand">Hand raised</small>}
+                  </button>
+                );
+              })}
             </div>
+            <h3 className="livekit-attendance-heading">
+              Attended this session <span>{attendees.length}</span>
+            </h3>
+            {attendees.length === 0
+              ? <p className="livekit-attendance-empty">No students have joined this class yet.</p>
+              : <ul className="livekit-attendance-list">
+                {attendees.map((attendee) => {
+                  const isConnected = participants.some((participant) =>
+                    participant.id === attendee.id && participant.role === "student");
+                  const joinedAt = new Date(attendee.firstJoinedAt);
+                  return (
+                    <li key={attendee.id}>
+                      <strong>{attendee.name}</strong>
+                      <small>{isConnected ? "In class" : `Attended ${formatRecordingDuration(attendee.attendanceSeconds)}`}</small>
+                      <time dateTime={attendee.firstJoinedAt}>
+                        Joined {new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit" }).format(joinedAt)}
+                      </time>
+                    </li>
+                  );
+                })}
+              </ul>}
           </section>
           <section className="livekit-chat" aria-label="Class chat">
             <header><h2>Class chat</h2></header>

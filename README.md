@@ -141,15 +141,22 @@ when connectivity returns; chunk numbers make server retries idempotent.
 Keep the live-class page open after ending a class if some chunks are still
 queued so the platform can finish uploading them and finalize the recording.
 
+The teacher's live-class page also shows a separate attendance history, so
+students remain listed there after disconnecting. Attendance history is stored
+from the time this feature is deployed; earlier joins cannot be reconstructed
+if they were not previously recorded.
+
 ### Manual live-class test checklist
 
 1. Sign in as a teacher and open an assigned class; verify the Start class button.
 2. Join in two other browsers or devices as enrolled students on different networks.
-3. Confirm each student joins muted and no tile shows speaking permission.
-4. Click one student tile to unmute it, then click again to mute it.
-5. Test Mute all and Unmute all.
-6. Select Share screen, verify the main view changes, then Stop sharing.
-7. Verify raised hands appear on student tiles.
-8. End the class and verify every participant sees the class-ended state.
-9. Temporarily disconnect the teacher's internet; verify chunks queue locally,
+3. Confirm the teacher occupies the main stage and camera-on students appear in
+   their own video tiles; camera-off students should show their profile avatars.
+4. Confirm each student joins muted and no tile shows speaking permission.
+5. Click one student tile to unmute it, then click again to mute it.
+6. Test Mute all and Unmute all.
+7. Select Share screen, verify the main view changes, then Stop sharing.
+8. Verify raised hands appear on student tiles.
+9. End the class and verify every participant sees the class-ended state.
+10. Temporarily disconnect the teacher's internet; verify chunks queue locally,
    then reconnect and confirm they upload before the recording is finalized.

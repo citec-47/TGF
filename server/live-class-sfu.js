@@ -2,6 +2,11 @@ import { Server as SocketIOServer } from "socket.io";
 import * as mediasoup from "mediasoup";
 import { authenticateLiveClassCookie } from "./live-class-auth.js";
 import { getLiveClassConfig, isLiveClassUuid } from "./live-class-validation.js";
+import {
+  listLiveSessionAttendees,
+  markLiveSessionParticipantJoined,
+  markLiveSessionParticipantLeft,
+} from "./live-session-attendance.js";
 
 const rooms = new Map();
 
@@ -122,8 +127,12 @@ export async function createLiveClassSfu(httpServer, pool) {
 
   io.on("connection", (socket) => {
     socket.on("live-class:join", async (payload, ack) => {
+      let sessionId;
+      let attendanceStarted = false;
+      let attendanceParticipantId;
+      let participantRegistered = false;
       try {
-        const sessionId = payload?.sessionId;
+        sessionId = payload?.sessionId;
         if (!isLiveClassUuid(sessionId)) throw new Error("Choose a valid live class.");
         const authorization = await authorize(socket, sessionId);
         if ([...rooms.values()].reduce((count, candidate) =>
@@ -135,7 +144,20 @@ export async function createLiveClassSfu(httpServer, pool) {
           room.started = true;
         }
         if (authorization.role === "teacher") room.teacherId = authorization.user.id;
+        if (authorization.role === "student") {
+          await markLiveSessionParticipantJoined(pool, sessionId, authorization.user.id);
+          attendanceStarted = true;
+          attendanceParticipantId = authorization.user.id;
+        }
+        const attendees = await listLiveSessionAttendees(pool, sessionId);
         await socket.join(sessionId);
+        if (!socket.connected) {
+          if (attendanceStarted) {
+            await markLiveSessionParticipantLeft(pool, sessionId, authorization.user.id);
+            attendanceStarted = false;
+          }
+          return;
+        }
         room.participants.set(socket.id, {
           id: authorization.user.id,
           name: authorization.user.full_name,
@@ -149,8 +171,9 @@ export async function createLiveClassSfu(httpServer, pool) {
           producers: new Map(),
           consumers: new Map(),
         });
+        participantRegistered = true;
         ack?.({ ok: true, participantId: authorization.user.id, role: authorization.role, rtcCapabilities: room.router.rtpCapabilities,
-          iceServers: config.iceServers, participants: uniqueParticipants(room),
+          iceServers: config.iceServers, participants: uniqueParticipants(room), attendees,
           producers: [...room.participants.values()].flatMap((participant) =>
             [...participant.producers.values()]
               .filter((producer) => !producer.paused)
@@ -159,6 +182,8 @@ export async function createLiveClassSfu(httpServer, pool) {
                 producerId: producer.id,
                 kind: producer.kind,
                 name: participant.name,
+                role: participant.role,
+                source: producer.appData.source,
               }))),
           started: room.started, session: { programmeTitle: authorization.session.programme_title,
             teacherName: authorization.session.teacher_name } });
@@ -171,7 +196,18 @@ export async function createLiveClassSfu(httpServer, pool) {
           cameraOn: false,
           raisedHand: false,
         });
+        io.to(sessionId).emit("live-class:attendees", attendees);
       } catch (error) {
+        if (attendanceStarted && !participantRegistered) {
+          try {
+            const participant = rooms.get(sessionId)?.participants.get(socket.id);
+            if (!participant) {
+              await markLiveSessionParticipantLeft(pool, sessionId, attendanceParticipantId);
+            }
+          } catch (cleanupError) {
+            console.error("Could not clean up attendance after a failed class join.", cleanupError);
+          }
+        }
         ack?.({ ok: false, error: error instanceof Error ? error.message : "The live class could not be joined." });
       }
     });
@@ -239,7 +275,10 @@ export async function createLiveClassSfu(httpServer, pool) {
           kind: payload.kind,
           rtpParameters: payload.rtpParameters,
           paused: payload.kind === "video" && !entry.participant.videoEnabled,
-          appData: { participantId: entry.participant.id, kind: payload.kind },
+          appData: {
+            participantId: entry.participant.id,
+            source: payload.kind === "video" && payload.source === "screen" ? "screen" : "camera",
+          },
         });
         entry.participant.producers.set(producer.id, producer);
         const syncCameraState = () => {
@@ -251,12 +290,18 @@ export async function createLiveClassSfu(httpServer, pool) {
         };
         producer.observer.on("pause", syncCameraState);
         producer.observer.on("resume", syncCameraState);
+        producer.observer.on("close", () => {
+          entry.participant.producers.delete(producer.id);
+          syncCameraState();
+        });
         syncCameraState();
         socket.to(entry.sessionId).emit("live-class:new-producer", {
           participantId: entry.participant.id,
           producerId: producer.id,
           kind: payload.kind,
           name: entry.participant.name,
+          role: entry.participant.role,
+          source: producer.appData.source,
         });
         ack?.({ ok: true, producerId: producer.id });
       } catch (error) {
@@ -425,11 +470,21 @@ export async function createLiveClassSfu(httpServer, pool) {
       }
     });
 
-    socket.on("disconnect", () => {
+    socket.on("disconnect", async () => {
       for (const [sessionId, room] of rooms.entries()) {
-        if (!room.participants.has(socket.id)) continue;
+        const participant = room.participants.get(socket.id);
+        if (!participant) continue;
         room.participants.delete(socket.id);
         io.to(sessionId).emit("live-class:participants", uniqueParticipants(room));
+        if (participant.role === "student" &&
+            ![...room.participants.values()].some((item) => item.id === participant.id && item.role === "student")) {
+          try {
+            await markLiveSessionParticipantLeft(pool, sessionId, participant.id);
+            io.to(sessionId).emit("live-class:attendees", await listLiveSessionAttendees(pool, sessionId));
+          } catch (error) {
+            console.error("Could not save live-class attendance after disconnect.", error);
+          }
+        }
         break;
       }
     });
