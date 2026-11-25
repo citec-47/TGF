@@ -1617,14 +1617,19 @@
   }
 
   .corp-hero-grid {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
     gap: 8px;
     padding-block: 45px 24px;
   }
 
+  .corp-hero-copy {
+    min-width: 0;
+  }
+
   .corp-hero-copy h1 {
     margin-block: 17px;
-    font-size: clamp(55px, 17vw, 78px);
+    font-size: clamp(24px, 10vw, 55px);
+    overflow-wrap: anywhere;
   }
 
   .corp-hero-intro {
@@ -1641,7 +1646,10 @@
   }
 
   .corp-hero-art {
+    width: min(100%, 360px);
+    min-width: 0;
     min-height: 275px;
+    justify-self: center;
     margin-top: 4px;
   }
 
@@ -1674,7 +1682,8 @@
 
   .corp-section-heading h2,
   .corp-community-grid h2 {
-    font-size: 40px;
+    font-size: clamp(30px, 10vw, 40px);
+    overflow-wrap: anywhere;
   }
 
   .corp-lead {
@@ -1707,12 +1716,21 @@
   }
 
   .corp-programme-heading h3 {
-    font-size: 27px;
+    font-size: clamp(18px, 6.2vw, 27px);
+    overflow-wrap: anywhere;
+  }
+
+  .corp-programme-heading {
+    gap: 12px;
+  }
+
+  .corp-programme-heading > div {
+    min-width: 0;
   }
 
   .corp-programme-mark {
-    width: 41px;
-    height: 41px;
+    width: 36px;
+    height: 36px;
   }
 
   .corp-award-list,
@@ -1763,6 +1781,43 @@
     justify-content: flex-start;
     flex-wrap: wrap;
     gap: 10px 18px;
+  }
+}
+
+@media (max-width: 360px) {
+  .corp-header .header-inner {
+    gap: 8px;
+  }
+
+  .corp-header .corp-brand {
+    width: clamp(88px, 34vw, 120px);
+  }
+
+  .corp-header .brand-caption {
+    display: none;
+  }
+
+  .corp-header .menu-toggle {
+    width: 36px;
+    height: 36px;
+    flex: 0 0 36px;
+  }
+
+  .corp-header .corp-header-cta {
+    min-height: 36px;
+    gap: 5px;
+    padding: 7px;
+    font-size: 9px;
+  }
+}
+
+@media (max-width: 260px) {
+  .corp-orbit-neptune {
+    --orbit-scale: 0.9;
+  }
+
+  .corp-header .corp-header-cta {
+    padding-inline: 6px;
   }
 }
 
