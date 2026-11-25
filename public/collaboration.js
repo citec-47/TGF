@@ -1269,6 +1269,27 @@
         video.setAttribute("aria-label", `${item.programmeTitle} class recording from ${item.classDate}`);
         card.append(video);
       }
+      if (canDismiss && state.account?.role === "administrator") {
+        const deleteButton = element("button", "small-action small-action-danger", "Move video to trash");
+        deleteButton.type = "button";
+        deleteButton.addEventListener("click", async () => {
+          if (!window.confirm(
+            "Move this class recording to Trash? It will be permanently deleted after 30 days unless restored.",
+          )) return;
+          deleteButton.disabled = true;
+          try {
+            await request(`/api/collaboration/recordings/${encodeURIComponent(item.sessionId)}`, {
+              method: "DELETE",
+              body: JSON.stringify({}),
+            });
+            await loadRecordings();
+          } catch (error) {
+            card.append(element("p", "admin-message is-error", error.message));
+            deleteButton.disabled = false;
+          }
+        });
+        card.append(deleteButton);
+      }
     } else {
       card.append(element("span", `visibility-badge${item.recordingStatus === "failed" ? " is-hidden" : ""}`, item.recordingStatus));
       if (item.recordingError) card.append(element("p", "admin-message is-error", item.recordingError));

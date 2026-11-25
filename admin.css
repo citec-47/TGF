@@ -5033,9 +5033,56 @@
   --admin-ink: #f4eee8;
   --admin-ink-soft: #c2b9af;
   color-scheme: dark;
+  isolation: isolate;
   min-height: 100vh;
   background: #171513;
   color: #f4eee8;
+}
+
+.admin-page.is-dark::before,
+.admin-page.is-dark::after {
+  position: fixed;
+  z-index: -1;
+  inset: 0;
+  pointer-events: none;
+  content: "";
+  background-repeat: no-repeat;
+}
+
+.admin-page.is-dark::before {
+  background-image:
+    radial-gradient(circle at 8% 14%, rgba(255, 255, 255, 0.9) 0 1px, transparent 1.7px),
+    radial-gradient(circle at 23% 38%, rgba(255, 255, 255, 0.8) 0 1px, transparent 1.7px),
+    radial-gradient(circle at 39% 11%, rgba(255, 255, 255, 0.85) 0 1px, transparent 1.7px),
+    radial-gradient(circle at 57% 28%, rgba(255, 255, 255, 0.8) 0 1px, transparent 1.7px),
+    radial-gradient(circle at 72% 16%, rgba(255, 255, 255, 0.9) 0 1px, transparent 1.7px),
+    radial-gradient(circle at 91% 34%, rgba(255, 255, 255, 0.8) 0 1px, transparent 1.7px),
+    radial-gradient(circle at 15% 76%, rgba(255, 255, 255, 0.8) 0 1px, transparent 1.7px),
+    radial-gradient(circle at 48% 83%, rgba(255, 255, 255, 0.9) 0 1px, transparent 1.7px),
+    radial-gradient(circle at 83% 72%, rgba(255, 255, 255, 0.85) 0 1px, transparent 1.7px);
+  animation: dashboard-stars-twinkle 4.8s ease-in-out infinite;
+}
+
+.admin-page.is-dark::after {
+  background-image:
+    radial-gradient(circle at 17% 23%, rgba(255, 255, 255, 0.8) 0 1px, transparent 1.7px),
+    radial-gradient(circle at 33% 67%, rgba(255, 255, 255, 0.9) 0 1px, transparent 1.7px),
+    radial-gradient(circle at 51% 47%, rgba(255, 255, 255, 0.8) 0 1px, transparent 1.7px),
+    radial-gradient(circle at 68% 63%, rgba(255, 255, 255, 0.85) 0 1px, transparent 1.7px),
+    radial-gradient(circle at 86% 12%, rgba(255, 255, 255, 0.9) 0 1px, transparent 1.7px),
+    radial-gradient(circle at 94% 87%, rgba(255, 255, 255, 0.8) 0 1px, transparent 1.7px);
+  animation: dashboard-stars-twinkle 3.6s ease-in-out -1.7s infinite;
+}
+
+@keyframes dashboard-stars-twinkle {
+  0%,
+  100% {
+    opacity: 0.14;
+  }
+
+  50% {
+    opacity: 0.62;
+  }
 }
 
 .admin-page.is-dark,
@@ -5054,6 +5101,11 @@
 .admin-page.is-dark .course-card {
   background: #171513;
   color: #f4eee8;
+}
+
+.admin-page.is-dark .student-dashboard-shell,
+.admin-page.is-dark .student-dashboard-content {
+  background: transparent;
 }
 
 .admin-page.is-dark .student-dashboard-content,

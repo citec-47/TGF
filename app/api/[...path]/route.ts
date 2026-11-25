@@ -63,6 +63,11 @@ import {
   handleCollaborationRequest,
   publishCollaborationEvent,
 } from "../../../server/collaboration";
+import {
+  permanentlyDeleteRecordingFromTrash,
+  purgeExpiredRecordingTrash,
+  restoreRecordingFromTrash,
+} from "../../../server/recording-trash.js";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -744,6 +749,13 @@ async function startUserSupportAccess(
 async function listAdminTrash(): Promise<Response> {
   try {
     await ensureSchema();
+    const cleanup = await purgeExpiredRecordingTrash(pool);
+    if (cleanup.failed) {
+      safeLogFailure(
+        "Class recording trash cleanup",
+        new Error(`${cleanup.failed} recording video(s) could not be deleted.`),
+      );
+    }
     const result = await pool.query<{
       id: string;
       title: string;
@@ -751,26 +763,39 @@ async function listAdminTrash(): Promise<Response> {
       approval_status: string;
       teacher_name: string | null;
       entity_type: string;
+      purge_started_at: Date | null;
     }>(
-      `SELECT id, title, deleted_at, approval_status, teacher_name, entity_type
+      `SELECT id, title, deleted_at, approval_status, teacher_name, entity_type,
+              purge_started_at
        FROM (
          SELECT l.id, l.title, l.deleted_at, l.approval_status::text AS approval_status,
-                u.full_name AS teacher_name, 'live-class'::text AS entity_type
+                u.full_name AS teacher_name, 'live-class'::text AS entity_type,
+                NULL::timestamptz AS purge_started_at
          FROM tgf_live_classes l
          LEFT JOIN tgf_users u ON u.id = l.teacher_id
          WHERE l.deleted_at IS NOT NULL
          UNION ALL
          SELECT timetable.id, programme.title || ' weekly timetable', timetable.deleted_at,
-                timetable.status::text, teacher.full_name, 'weekly-timetable'::text
+                timetable.status::text, teacher.full_name, 'weekly-timetable'::text,
+                NULL::timestamptz
          FROM tgf_course_timetables timetable
          JOIN tgf_programmes programme ON programme.id = timetable.programme_id
          JOIN tgf_users teacher ON teacher.id = timetable.teacher_id
          WHERE timetable.deleted_at IS NOT NULL
          UNION ALL
          SELECT programme.id, programme.title, programme.deleted_at,
-                ''::text, NULL::text, 'programme'::text
+                ''::text, NULL::text, 'programme'::text, NULL::timestamptz
          FROM tgf_programmes programme
          WHERE programme.deleted_at IS NOT NULL
+         UNION ALL
+         SELECT session.id,
+                programme.title || ' · ' || to_char(session.class_date, 'Mon DD, YYYY'),
+                session.recording_deleted_at, 'ready'::text, teacher.full_name,
+                'class-recording'::text, session.recording_purge_started_at
+         FROM tgf_live_sessions session
+         JOIN tgf_programmes programme ON programme.id = session.programme_id
+         JOIN tgf_users teacher ON teacher.id = session.teacher_id
+         WHERE session.recording_deleted_at IS NOT NULL
        ) trash
        ORDER BY deleted_at DESC, lower(title)`,
     );
@@ -783,11 +808,15 @@ async function listAdminTrash(): Promise<Response> {
           ? "Course"
           : row.entity_type === "weekly-timetable"
             ? "Weekly timetable"
-            : row.approval_status === "approved" ? "Approved timetable" : "Timetable",
+            : row.entity_type === "class-recording"
+              ? "Class recording video"
+              : row.approval_status === "approved" ? "Approved timetable" : "Timetable",
         teacherName: row.teacher_name || "Unknown teacher",
         deletedAt: row.deleted_at,
         permanentDeleteAt: new Date(new Date(row.deleted_at).getTime() + 30 * 24 * 60 * 60 * 1000).toISOString(),
+        canRestore: row.entity_type !== "class-recording" || !row.purge_started_at,
       })),
+      cleanupFailed: cleanup.failed > 0,
     });
   } catch (error) {
     safeLogFailure("Trash lookup", error);
@@ -885,6 +914,30 @@ async function deleteAdminTrashItem(itemId: string): Promise<Response> {
   } catch (error) {
     safeLogFailure("Trash purge", error);
     return jsonResponse(503, { error: "The item could not be permanently deleted." });
+  }
+}
+
+async function restoreAdminRecordingTrashItem(itemId: string): Promise<Response> {
+  try {
+    await ensureSchema();
+    const restored = await restoreRecordingFromTrash(pool, itemId);
+    if (!restored) return jsonResponse(404, { error: "This class recording is no longer in Trash or has expired." });
+    return jsonResponse(200, { restored: true });
+  } catch (error) {
+    safeLogFailure("Class recording restore", error);
+    return jsonResponse(503, { error: "The class recording could not be restored from Trash." });
+  }
+}
+
+async function permanentlyDeleteAdminRecording(itemId: string): Promise<Response> {
+  try {
+    await ensureSchema();
+    const deleted = await permanentlyDeleteRecordingFromTrash(pool, itemId);
+    if (!deleted) return jsonResponse(404, { error: "This class recording is no longer in Trash." });
+    return jsonResponse(200, { deleted: true, title: deleted.title });
+  } catch (error) {
+    safeLogFailure("Class recording trash purge", error);
+    return jsonResponse(503, { error: "The class recording video could not be permanently deleted." });
   }
 }
 
@@ -8800,6 +8853,49 @@ async function handleRequest(request: Request): Promise<Response> {
       return jsonResponse(403, { error: "This request must come from the TGFVP website." });
     }
     return startUserSupportAccess(request, segments[3], administrator.id);
+  }
+
+  if (
+    segments.length === 6 &&
+    segments.slice(0, 3).join("/") === "api/admin/trash" &&
+    segments[3] === "recordings" &&
+    segments[5] === "restore"
+  ) {
+    let administrator: UserSessionRow | null;
+    try {
+      administrator = await requireAdministrator(request);
+    } catch (error) {
+      safeLogFailure("Recording trash restore access check", error);
+      return jsonResponse(503, { error: "Admin access could not be verified." });
+    }
+    if (!administrator) return jsonResponse(403, { error: "An administrator account is required to continue." });
+    if (!isUuid(segments[4])) return jsonResponse(404, { error: "This class recording was not found." });
+    if (request.method !== "POST") return jsonResponse(405, { error: "Method not allowed." });
+    if (!hasSameOrigin(request)) {
+      return jsonResponse(403, { error: "This request must come from the TGFVP website." });
+    }
+    return restoreAdminRecordingTrashItem(segments[4]);
+  }
+
+  if (
+    segments.length === 5 &&
+    segments.slice(0, 3).join("/") === "api/admin/trash" &&
+    segments[3] === "recordings"
+  ) {
+    let administrator: UserSessionRow | null;
+    try {
+      administrator = await requireAdministrator(request);
+    } catch (error) {
+      safeLogFailure("Recording trash administrator access check", error);
+      return jsonResponse(503, { error: "Admin access could not be verified." });
+    }
+    if (!administrator) return jsonResponse(403, { error: "An administrator account is required to continue." });
+    if (!isUuid(segments[4])) return jsonResponse(404, { error: "This class recording was not found." });
+    if (request.method !== "DELETE") return jsonResponse(405, { error: "Method not allowed." });
+    if (!hasSameOrigin(request)) {
+      return jsonResponse(403, { error: "This request must come from the TGFVP website." });
+    }
+    return permanentlyDeleteAdminRecording(segments[4]);
   }
 
   if (

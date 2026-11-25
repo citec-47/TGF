@@ -462,7 +462,19 @@ async function loadAdminTrash() {
         makeTag("p", "admin-location-subtitle", `Type: ${item.kind}`),
         makeTag("p", "admin-location-subtitle", `Deleted: ${dateFormatter.format(new Date(item.deletedAt))}`),
       );
-      if (item.entityType === "live-class") {
+      if (item.entityType === "class-recording") {
+        details.append(
+          makeTag("p", "admin-location-subtitle", `Tutor: ${item.teacherName}`),
+          makeTag("p", "admin-location-subtitle", `Video permanently deleted: ${dateFormatter.format(new Date(item.permanentDeleteAt))}`),
+        );
+        if (!item.canRestore) {
+          details.append(makeTag(
+            "p",
+            "admin-location-subtitle",
+            "Permanent deletion has started; this video can no longer be restored.",
+          ));
+        }
+      } else if (item.entityType === "live-class") {
         details.append(makeTag(
           "p",
           "admin-location-subtitle",
@@ -472,38 +484,46 @@ async function loadAdminTrash() {
         details.append(makeTag("p", "admin-location-subtitle", "This record can be restored from trash."));
       }
       const controls = makeTag("div", "admin-user-controls");
-      const restore = makeTag("button", "small-action", "Restore");
-      restore.type = "button";
-      restore.addEventListener("click", async () => {
-        try {
-          const restoreUrl = item.entityType === "programme"
-            ? `/api/admin/programmes/${encodeURIComponent(item.id)}/restore`
-            : item.entityType === "weekly-timetable"
-              ? `/api/admin/course-timetables/${encodeURIComponent(item.id)}/restore`
-              : `/api/admin/trash/${encodeURIComponent(item.id)}/restore`;
-          await requestJson(restoreUrl, { method: "POST" });
-          if (item.entityType === "programme") await loadProgrammes();
-          if (item.entityType === "weekly-timetable") {
-            const refreshTimetables = document.querySelector('[data-collab-refresh="timetable"]');
-            if (refreshTimetables) refreshTimetables.click();
+      if (item.canRestore !== false) {
+        const restore = makeTag("button", "small-action", "Restore");
+        restore.type = "button";
+        restore.addEventListener("click", async () => {
+          try {
+            const restoreUrl = item.entityType === "programme"
+              ? `/api/admin/programmes/${encodeURIComponent(item.id)}/restore`
+              : item.entityType === "weekly-timetable"
+                ? `/api/admin/course-timetables/${encodeURIComponent(item.id)}/restore`
+                : item.entityType === "class-recording"
+                  ? `/api/admin/trash/recordings/${encodeURIComponent(item.id)}/restore`
+                  : `/api/admin/trash/${encodeURIComponent(item.id)}/restore`;
+            await requestJson(restoreUrl, { method: "POST" });
+            if (item.entityType === "programme") await loadProgrammes();
+            if (item.entityType === "weekly-timetable") {
+              const refreshTimetables = document.querySelector('[data-collab-refresh="timetable"]');
+              if (refreshTimetables) refreshTimetables.click();
+            }
+            await loadAdminTrash();
+            setMessage(trashMessage, `${item.title} was restored.`);
+          } catch (error) {
+            setMessage(trashMessage, error.message, true);
           }
-          await loadAdminTrash();
-          setMessage(trashMessage, `${item.title} was restored.`);
-        } catch (error) {
-          setMessage(trashMessage, error.message, true);
-        }
-      });
-      controls.append(restore);
-      if (item.entityType === "live-class") {
+        });
+        controls.append(restore);
+      }
+      if (item.entityType === "live-class" || item.entityType === "class-recording") {
         const purge = makeTag("button", "small-action small-action-danger", "Delete permanently");
         purge.type = "button";
         purge.addEventListener("click", async () => {
           if (!window.confirm(`Permanently delete "${item.title}" from trash? This cannot be undone.`)) return;
           try {
-            await requestJson(`/api/admin/trash/${encodeURIComponent(item.id)}`, { method: "DELETE" });
+            const deleteUrl = item.entityType === "class-recording"
+              ? `/api/admin/trash/recordings/${encodeURIComponent(item.id)}`
+              : `/api/admin/trash/${encodeURIComponent(item.id)}`;
+            await requestJson(deleteUrl, { method: "DELETE" });
             await loadAdminTrash();
             setMessage(trashMessage, `${item.title} was permanently deleted.`);
           } catch (error) {
+            await loadAdminTrash();
             setMessage(trashMessage, error.message, true);
           }
         });
@@ -512,7 +532,13 @@ async function loadAdminTrash() {
       row.append(details, controls);
       trashList.append(row);
     }
-    setMessage(trashMessage, "");
+    setMessage(
+      trashMessage,
+      result.cleanupFailed
+        ? "Some class recording videos could not be permanently deleted yet. They remain in Trash for another attempt."
+        : "",
+      Boolean(result.cleanupFailed),
+    );
   } catch (error) {
     trashList.replaceChildren(makeTag("p", "admin-empty", "Trash is unavailable."));
     setMessage(trashMessage, error.message, true);

@@ -15,6 +15,7 @@ import {
   isJoinWindowOpen,
 } from "./live-session-validation.js";
 import { assembleRecordingPartFile, saveRecordingChunkFile } from "./live-recording-storage.js";
+import { moveRecordingToTrash } from "./recording-trash.js";
 import { validateMessageAttachment } from "./message-validation.js";
 
 interface CollaborationAccount {
@@ -1283,6 +1284,7 @@ async function listRecordings(
            AND enrollment.approval_status = 'approved'
        ))
      )
+       AND session.recording_deleted_at IS NULL
        AND ($2 <> 'administrator' OR session.recording_hidden_from_admin_at IS NULL)
        AND ($2 <> 'teacher' OR session.recording_hidden_from_teacher_at IS NULL)
      ORDER BY session.class_date DESC, COALESCE(session.started_at, session.created_at) DESC
@@ -1375,6 +1377,39 @@ async function dismissFailedRecording(
     sessionId,
   );
   return services.jsonResponse(200, { deleted: true });
+}
+
+async function removeRecordingFromList(
+  sessionId: string,
+  account: CollaborationAccount,
+  services: CollaborationServices,
+): Promise<Response> {
+  if (account.role === "administrator") {
+    const trashed = await moveRecordingToTrash(services.pool, sessionId, account.id);
+    if (trashed) {
+      await publishCollaborationEvent(services.pool, "administrator", "recording-dismissed", sessionId);
+      return services.jsonResponse(200, { deleted: true, movedToTrash: true });
+    }
+
+    const existing = await services.pool.query<{
+      recording_status: string;
+      recording_deleted_at: Date | null;
+    }>(
+      `SELECT recording_status, recording_deleted_at
+       FROM tgf_live_sessions WHERE id = $1`,
+      [sessionId],
+    );
+    if (!existing.rows[0]) {
+      return services.jsonResponse(404, { error: "This class recording was not found." });
+    }
+    if (existing.rows[0].recording_deleted_at) {
+      return services.jsonResponse(409, { error: "This recording is already in Trash." });
+    }
+    if (existing.rows[0].recording_status !== "failed") {
+      return services.jsonResponse(409, { error: "Only an uploaded class recording can be moved to Trash." });
+    }
+  }
+  return dismissFailedRecording(sessionId, account, services);
 }
 
 async function joinScheduledSession(
@@ -2675,6 +2710,7 @@ async function serveRecording(
             session.programme_id, session.teacher_id
      FROM tgf_live_sessions session
      WHERE session.id = $1 AND session.recording_status = 'ready'
+       AND session.recording_deleted_at IS NULL
        AND session.recording_url <> ''
        AND (
          $3 = 'administrator' OR
@@ -2710,6 +2746,7 @@ async function serveRecordingPart(
      JOIN tgf_live_recording_parts part ON part.recording_id = recording.id
      WHERE session.id = $1 AND part.part_number = $2
        AND session.recording_status = 'ready'
+       AND session.recording_deleted_at IS NULL
        AND recording.upload_status = 'ready'
        AND part.upload_status = 'ready'
        AND part.cloudinary_public_id <> ''
@@ -2858,7 +2895,8 @@ async function recordingSessionForTeacher(
             COALESCE(session.started_at, NOW()) AS started_at
      FROM tgf_live_sessions session
      JOIN tgf_programmes programme ON programme.id = session.programme_id
-     WHERE session.id = $1 AND session.teacher_id = $2`,
+     WHERE session.id = $1 AND session.teacher_id = $2
+       AND session.recording_deleted_at IS NULL`,
     [sessionId, account.id],
   );
   return result.rows[0] || null;
@@ -3225,7 +3263,7 @@ export async function handleCollaborationRequest(
       if (!isUuid(segments[3])) {
         return services.jsonResponse(404, { error: "This failed class recording was not found." });
       }
-      return await dismissFailedRecording(segments[3], account, services);
+      return await removeRecordingFromList(segments[3], account, services);
     }
     if (pathname === "/api/collaboration/notifications" && request.method === "GET") {
       return await listNotifications(account, services);
