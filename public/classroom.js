@@ -3046,6 +3046,7 @@ async function showClassroom(account) {
         registerForm.hidden = false;
         registerForm.elements.fullName.value = account.fullName;
         registerForm.elements.email.value = account.email;
+        registerForm.elements.whatsappNumber.value = account.whatsappNumber || "";
       } else {
         studentAccountStatusMessage.textContent = "Your account is awaiting admin approval. You cannot access the student dashboard until your account is approved.";
         intro.textContent = "Your registration is being reviewed by the TGFVP administrator.";
@@ -3126,6 +3127,7 @@ if (registerForm) {
         body: JSON.stringify({
           fullName: registerForm.elements.fullName.value.trim(),
           email: registerForm.elements.email.value.trim(),
+          whatsappNumber: registerForm.elements.whatsappNumber.value.trim(),
           password: registerForm.elements.password.value,
         }),
       });

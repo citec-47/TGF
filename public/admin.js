@@ -969,7 +969,7 @@ function renderUsers() {
   const roleFilter = memberRoleFilter.value;
   const subsidiaryFilter = memberSubsidiaryFilter.value;
   const filteredUsers = users.filter((user) =>
-    (!query || `${user.fullName} ${user.email}`.toLowerCase().includes(query)) &&
+    (!query || `${user.fullName} ${user.email} ${user.whatsappNumber || ""}`.toLowerCase().includes(query)) &&
     (roleFilter === "all" || user.role === roleFilter) &&
     (subsidiaryFilter === "all" || user.subsidiary === subsidiaryFilter),
   );
@@ -993,6 +993,23 @@ function renderUsers() {
       makeTag("p", "admin-location-subtitle", `${user.email} · ${user.role.replaceAll("_", " ")}`),
       makeTag("p", "admin-location-subtitle", `Registered ${new Intl.DateTimeFormat("en-CM", { dateStyle: "medium" }).format(new Date(user.createdAt))}`),
     );
+    if (user.role === "learner" && user.accountStatus === "active" && user.whatsappNumber) {
+      const whatsapp = document.createElement("a");
+      const whatsappLine = makeTag("p", "admin-location-subtitle");
+      const digits = user.whatsappNumber.replace(/\D/g, "");
+      const message = `Congratulations ${user.fullName}! Your TGFVP student account has been approved. You can now sign in at ${new URL("/student", window.location.origin).href} using your registered email address and password.`;
+      whatsapp.className = "admin-location-subtitle";
+      whatsapp.href = `https://wa.me/${digits}?text=${encodeURIComponent(message)}`;
+      whatsapp.target = "_blank";
+      whatsapp.rel = "noopener noreferrer";
+      whatsapp.textContent = user.whatsappNumber;
+      whatsapp.setAttribute("aria-label", `Open WhatsApp approval message for ${user.fullName}`);
+      whatsappLine.append("WhatsApp: ", whatsapp);
+      details.append(
+        whatsappLine,
+        makeTag("p", "admin-field-hint", "Opens a prefilled message; press Send in WhatsApp."),
+      );
+    }
     const controls = makeTag("div", "admin-user-controls");
     const role = document.createElement("select");
     role.setAttribute("aria-label", `Role for ${user.fullName}`);
@@ -2928,6 +2945,7 @@ function renderPendingAccounts() {
     details.append(
       makeTag("h3", "", account.fullName),
       makeTag("p", "admin-location-subtitle", account.email),
+      makeTag("p", "admin-location-subtitle", `WhatsApp: ${account.whatsappNumber || "Not provided"}`),
       makeTag("p", "admin-location-subtitle", `Course: ${account.courses} · Registered ${registered}`),
     );
     const actions = makeTag("div", "admin-user-controls");

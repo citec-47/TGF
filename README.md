@@ -36,6 +36,10 @@ classes for their assigned modules and draw on a persisted, shared classroom
 whiteboard. Class meeting URLs are supplied by administrators or teachers and
 open in the configured external meeting service; embedded video conferencing
 is not included.
+Learner registration collects an international-format WhatsApp number. Once an
+administrator approves an account, learners can sign in with their existing
+email and password. Administrators can click the number in the account list to
+open a prefilled WhatsApp approval message and press Send.
 
 `.env` is excluded from Git. Keep it private and configure the same environment
 variables in your production hosting provider before deployment. The

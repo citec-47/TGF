@@ -13,6 +13,7 @@ import {
   validateAccountReview,
   verifyPassword,
 } from "../../../server/account-security.js";
+import { normalizeWhatsAppNumber } from "../../../server/whatsapp-number.js";
 import {
   DEFAULT_MESSAGE_ATTACHMENT_MAX_BYTES,
   MAX_MESSAGE_ATTACHMENTS,
@@ -95,6 +96,7 @@ interface UserRow {
   must_change_password: boolean;
   account_status?: "pending" | "active" | "rejected";
   rejection_reason?: string;
+  whatsapp_number?: string | null;
   created_at: Date;
 }
 
@@ -108,6 +110,7 @@ interface UserSessionRow {
   must_change_password: boolean;
   account_status?: "pending" | "active" | "rejected";
   rejection_reason?: string;
+  whatsapp_number?: string | null;
 }
 
 interface BoardMemberRow {
@@ -415,8 +418,8 @@ async function getAccountForSession(request: Request): Promise<UserSessionRow | 
   }
   await ensureSchema();
   const result = await pool.query<UserSessionRow>(
-        `SELECT id, full_name, email, role, subsidiary, is_frozen, must_change_password,
-          account_status, rejection_reason
+    `SELECT id, full_name, email, role, subsidiary, is_frozen, must_change_password,
+            account_status, rejection_reason, whatsapp_number
      FROM tgf_users WHERE id = $1`,
     [session.userId],
   );
@@ -550,6 +553,7 @@ function serializeUser(user: UserRow) {
     mustChangePassword: user.must_change_password,
     accountStatus: user.account_status || "active",
     rejectionReason: user.rejection_reason || "",
+    whatsappNumber: user.whatsapp_number || "",
     createdAt: user.created_at,
   };
 }
@@ -682,7 +686,8 @@ async function listUsers(): Promise<Response> {
     await ensureSchema();
     const result = await pool.query<UserRow>(
       `SELECT id, full_name, email, password_hash, role, subsidiary,
-              is_frozen, must_change_password, account_status, rejection_reason, created_at
+              is_frozen, must_change_password, account_status, rejection_reason,
+              whatsapp_number, created_at
        FROM tgf_users ORDER BY lower(full_name), lower(email)`,
     );
     return jsonResponse(200, result.rows.map(serializeUser));
@@ -1097,10 +1102,11 @@ async function listPendingAccounts(): Promise<Response> {
       id: string;
       full_name: string;
       email: string;
+      whatsapp_number: string | null;
       created_at: Date;
       courses: string;
     }>(
-      `SELECT u.id, u.full_name, u.email, u.created_at,
+      `SELECT u.id, u.full_name, u.email, u.whatsapp_number, u.created_at,
               COALESCE(string_agg(DISTINCT p.title, ', ' ORDER BY p.title), 'Not selected') AS courses
        FROM tgf_users u
        LEFT JOIN tgf_enrollments e ON e.user_id = u.id
@@ -1113,6 +1119,7 @@ async function listPendingAccounts(): Promise<Response> {
       id: row.id,
       fullName: row.full_name,
       email: row.email,
+      whatsappNumber: row.whatsapp_number || "",
       courses: row.courses,
       registeredAt: row.created_at,
     })));
@@ -1173,13 +1180,14 @@ async function reviewLearnerAccount(
           actorKind === "member" ? actor.id : null],
       );
       await client.query("COMMIT");
-      return jsonResponse(200, { reviewed: true, accountStatus: nextStatus });
     } catch (error) {
       await client.query("ROLLBACK");
       throw error;
     } finally {
       client.release();
     }
+
+    return jsonResponse(200, { reviewed: true, accountStatus: action === "approve" ? "active" : "rejected" });
   } catch (error) {
     const status = error && typeof error === "object" && "status" in error
       ? Number((error as { status: unknown }).status)
@@ -2290,6 +2298,10 @@ async function registerLearner(request: Request): Promise<Response> {
     const fullName = typeof body.fullName === "string" ? body.fullName.trim() : "";
     const email = typeof body.email === "string" ? body.email.trim().toLowerCase() : "";
     const password = typeof body.password === "string" ? body.password : "";
+    const whatsappResult = normalizeWhatsAppNumber(body.whatsappNumber);
+    if ("error" in whatsappResult) {
+      return jsonResponse(400, { error: whatsappResult.error });
+    }
     if (fullName.length < 2 || fullName.length > 120) {
       return jsonResponse(400, { error: "Enter your full name (2 to 120 characters)." });
     }
@@ -2305,11 +2317,11 @@ async function registerLearner(request: Request): Promise<Response> {
       await client.query("BEGIN");
       const result = await client.query<{ id: string }>(
         `INSERT INTO tgf_users
-           (full_name, email, password_hash, role, subsidiary, is_frozen,
+           (full_name, email, password_hash, whatsapp_number, role, subsidiary, is_frozen,
             must_change_password, account_status)
-         VALUES ($1, $2, $3, 'learner', 'tgfvp', FALSE, FALSE, 'pending')
+         VALUES ($1, $2, $3, $4, 'learner', 'tgfvp', FALSE, FALSE, 'pending')
          RETURNING id`,
-        [fullName, email, hashPassword(password)],
+        [fullName, email, hashPassword(password), whatsappResult.whatsappNumber],
       );
       id = result.rows[0].id;
       await client.query(
@@ -8480,7 +8492,8 @@ async function handleRequest(request: Request): Promise<Response> {
       }
       const result = await pool.query<UserRow>(
         `SELECT id, full_name, email, password_hash, role, subsidiary,
-                is_frozen, must_change_password, account_status, rejection_reason, created_at
+                is_frozen, must_change_password, account_status, rejection_reason,
+                created_at
          FROM tgf_users WHERE lower(email) = $1
          ORDER BY CASE account_status
            WHEN 'pending' THEN 0 WHEN 'active' THEN 1 ELSE 2 END, created_at DESC
@@ -8554,6 +8567,7 @@ async function handleRequest(request: Request): Promise<Response> {
         mustChangePassword: account.must_change_password,
         accountStatus: account.account_status,
         rejectionReason: account.rejection_reason,
+        whatsappNumber: account.whatsapp_number || "",
         isFrozen: account.is_frozen,
       });
     } catch (error) {

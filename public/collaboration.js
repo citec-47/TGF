@@ -1239,7 +1239,7 @@
     return grid;
   }
 
-  function renderRecording(item, isAdmin = false) {
+  function renderRecording(item, canDismiss = false) {
     const card = element("article", "collaboration-recording-card");
     card.append(
       element("h3", "", `${item.programmeTitle} · ${item.classDate}`),
@@ -1249,23 +1249,39 @@
       card.append(element("p", "admin-location-subtitle", `Recording duration: ${formatRecordingDuration(item.durationSeconds)}`));
     }
     if (item.recordingStatus === "ready") {
-      const video = element("video", "collaboration-recording-video");
-      video.src = item.playbackUrl;
-      video.controls = true;
-      video.preload = "none";
-      video.setAttribute("aria-label", `${item.programmeTitle} class recording from ${item.classDate}`);
-      card.append(video);
+      if (item.recordingParts?.length) {
+        for (const part of item.recordingParts) {
+          if (item.recordingParts.length > 1) {
+            card.append(element("p", "admin-location-subtitle", part.title || `Part ${part.partNumber}`));
+          }
+          const video = element("video", "collaboration-recording-video");
+          video.src = part.playbackUrl;
+          video.controls = true;
+          video.preload = "none";
+          video.setAttribute("aria-label", `${item.programmeTitle} class recording from ${item.classDate}, part ${part.partNumber}`);
+          card.append(video);
+        }
+      } else {
+        const video = element("video", "collaboration-recording-video");
+        video.src = item.playbackUrl;
+        video.controls = true;
+        video.preload = "none";
+        video.setAttribute("aria-label", `${item.programmeTitle} class recording from ${item.classDate}`);
+        card.append(video);
+      }
     } else {
       card.append(element("span", `visibility-badge${item.recordingStatus === "failed" ? " is-hidden" : ""}`, item.recordingStatus));
       if (item.recordingError) card.append(element("p", "admin-message is-error", item.recordingError));
       if (item.recordingStatus === "failed") {
         card.append(element("p", "admin-location-subtitle", "The tutor can retry the upload from the live-class page while that page remains open."));
-        if (isAdmin) {
+        if (canDismiss) {
           const deleteButton = element("button", "small-action small-action-danger", "Delete failed entry");
           deleteButton.type = "button";
           deleteButton.addEventListener("click", async () => {
             if (!window.confirm(
-              "Delete this failed recording from General Classes? The tutor will still see it for troubleshooting.",
+              state.account?.role === "teacher"
+                ? "Remove this failed entry from My Live Classes? Class history and attendance will be kept."
+                : "Hide this failed recording from General Classes? The tutor will still see it.",
             )) return;
             deleteButton.disabled = true;
             try {
@@ -1316,7 +1332,9 @@
           continue;
         }
         if (!recordings.length) setEmpty(list, "No class recordings are available yet.");
-        else list.append(...recordings.map(renderRecording));
+        else list.append(...recordings.map((item) =>
+          renderRecording(item, state.account?.role === "teacher"),
+        ));
       }
     } catch (error) {
       lists.forEach((list) => setEmpty(list, error.message));

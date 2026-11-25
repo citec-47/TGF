@@ -1238,10 +1238,36 @@ async function listRecordings(
   services: CollaborationServices,
 ): Promise<Response> {
   const userId = account.role === "administrator" ? null : account.id;
-  const result = await services.pool.query(
+  const result = await services.pool.query<{
+    id: string;
+    class_date: string | Date;
+    recording_status: string;
+    recording_error: string;
+    started_at: Date | null;
+    recording_url: string;
+    recording_duration_seconds: number | string | null;
+    parts_upload_status: string | null;
+    parts_upload_error: string | null;
+    recording_parts: Array<{ partNumber: number; title: string; durationSeconds: number }> | null;
+    programme_id: string;
+    programme_title: string;
+    teacher_id: string;
+    teacher_name: string;
+  }>(
     `SELECT session.id, session.class_date, session.recording_status,
-            session.recording_error, session.started_at,
+            session.recording_error, session.started_at, session.recording_url,
             COALESCE(recording.duration_seconds, 0) AS recording_duration_seconds,
+            recording.upload_status AS parts_upload_status,
+            recording.last_error AS parts_upload_error,
+            COALESCE((
+              SELECT json_agg(json_build_object(
+                'partNumber', part.part_number,
+                'title', part.part_title,
+                'durationSeconds', part.duration_seconds
+              ) ORDER BY part.part_number)
+              FROM tgf_live_recording_parts part
+              WHERE part.recording_id = recording.id AND part.upload_status = 'ready'
+            ), '[]'::json) AS recording_parts,
             programme.id AS programme_id, programme.title AS programme_title,
             teacher.id AS teacher_id, teacher.full_name AS teacher_name
      FROM tgf_live_sessions session
@@ -1258,26 +1284,37 @@ async function listRecordings(
        ))
      )
        AND ($2 <> 'administrator' OR session.recording_hidden_from_admin_at IS NULL)
+       AND ($2 <> 'teacher' OR session.recording_hidden_from_teacher_at IS NULL)
      ORDER BY session.class_date DESC, COALESCE(session.started_at, session.created_at) DESC
      LIMIT 500`,
     [userId, account.role],
   );
   return services.jsonResponse(200, {
-    recordings: result.rows.map((row) => ({
-      sessionId: row.id,
-      classDate: String(row.class_date).slice(0, 10),
-      recordingStatus: row.recording_status,
-      recordingError: row.recording_error,
-      programmeId: row.programme_id,
-      programmeTitle: row.programme_title,
-      teacherId: row.teacher_id,
-      teacherName: row.teacher_name,
-      startsAt: row.started_at,
-      durationSeconds: Number(row.recording_duration_seconds || 0),
-      playbackUrl: row.recording_status === "ready"
-        ? `/api/collaboration/sessions/${encodeURIComponent(row.id)}/video`
-        : "",
-    })),
+    recordings: result.rows.map((row) => {
+      const recordingParts = Array.isArray(row.recording_parts) ? row.recording_parts : [];
+      const partsReady = row.parts_upload_status === "ready" && recordingParts.length > 0;
+      return {
+        sessionId: row.id,
+        classDate: String(row.class_date).slice(0, 10),
+        recordingStatus: partsReady ? "ready" : row.recording_status,
+        recordingError: row.recording_error || row.parts_upload_error || "",
+        programmeId: row.programme_id,
+        programmeTitle: row.programme_title,
+        teacherId: row.teacher_id,
+        teacherName: row.teacher_name,
+        startsAt: row.started_at,
+        durationSeconds: Number(row.recording_duration_seconds || 0),
+        playbackUrl: row.recording_status === "ready" && row.recording_url
+          ? `/api/collaboration/sessions/${encodeURIComponent(row.id)}/video`
+          : "",
+        recordingParts: partsReady
+          ? recordingParts.map((part) => ({
+            ...part,
+            playbackUrl: `/api/collaboration/sessions/${encodeURIComponent(row.id)}/recording-parts/${part.partNumber}`,
+          }))
+          : [],
+      };
+    }),
   });
 }
 
@@ -1286,31 +1323,57 @@ async function dismissFailedRecording(
   account: CollaborationAccount,
   services: CollaborationServices,
 ): Promise<Response> {
-  if (account.role !== "administrator") {
-    return services.jsonResponse(403, { error: "An administrator account is required to delete this failed recording." });
+  if (account.role !== "administrator" && account.role !== "teacher") {
+    return services.jsonResponse(403, { error: "Only the assigned tutor or an administrator can delete a failed recording." });
   }
-  const result = await services.pool.query(
-    `UPDATE tgf_live_sessions
-     SET recording_hidden_from_admin_at = NOW(), updated_at = NOW()
-     WHERE id = $1 AND recording_status = 'failed'
-       AND recording_hidden_from_admin_at IS NULL
-     RETURNING id`,
-    [sessionId],
-  );
+  const isAdministrator = account.role === "administrator";
+  const result = isAdministrator
+    ? await services.pool.query(
+      `UPDATE tgf_live_sessions
+       SET recording_hidden_from_admin_at = NOW(), updated_at = NOW()
+       WHERE id = $1 AND recording_status = 'failed'
+         AND recording_hidden_from_admin_at IS NULL
+       RETURNING id`,
+      [sessionId],
+    )
+    : await services.pool.query(
+      `UPDATE tgf_live_sessions
+       SET recording_hidden_from_teacher_at = NOW(), updated_at = NOW()
+       WHERE id = $1 AND teacher_id = $2 AND recording_status = 'failed'
+         AND recording_hidden_from_teacher_at IS NULL
+       RETURNING id`,
+      [sessionId, account.id],
+    );
   if (!result.rowCount) {
-    const existing = await services.pool.query<{ id: string; recording_status: string }>(
-      "SELECT id, recording_status FROM tgf_live_sessions WHERE id = $1",
+    const existing = await services.pool.query<{
+      id: string;
+      recording_status: string;
+      teacher_id: string;
+      recording_hidden_from_admin_at: Date | null;
+      recording_hidden_from_teacher_at: Date | null;
+    }>(
+      `SELECT id, recording_status, teacher_id,
+              recording_hidden_from_admin_at, recording_hidden_from_teacher_at
+       FROM tgf_live_sessions WHERE id = $1`,
       [sessionId],
     );
     if (!existing.rows[0]) {
       return services.jsonResponse(404, { error: "This failed class recording was not found." });
+    }
+    if (!isAdministrator && existing.rows[0].teacher_id !== account.id) {
+      return services.jsonResponse(403, { error: "Only the assigned tutor can delete this failed recording." });
     }
     if (existing.rows[0].recording_status !== "failed") {
       return services.jsonResponse(409, { error: "Only failed class recordings can be deleted from this list." });
     }
     return services.jsonResponse(200, { deleted: true });
   }
-  await publishCollaborationEvent(services.pool, "administrator", "recording-dismissed", sessionId);
+  await publishCollaborationEvent(
+    services.pool,
+    isAdministrator ? "administrator" : account.id,
+    "recording-dismissed",
+    sessionId,
+  );
   return services.jsonResponse(200, { deleted: true });
 }
 
@@ -2419,7 +2482,8 @@ async function completeBrowserRecording(
     `UPDATE tgf_live_sessions
      SET recording_status = 'ready', recording_url = $2, cloudinary_public_id = $3,
          recording_format = $4, recording_error = '',
-         recording_hidden_from_admin_at = NULL, updated_at = NOW()
+         recording_hidden_from_admin_at = NULL, recording_hidden_from_teacher_at = NULL,
+         updated_at = NOW()
      WHERE id = $1 AND teacher_id = $5 AND ended_at IS NOT NULL
        AND recording_status IN ('uploading', 'failed', 'ready')
      RETURNING id`,
@@ -2542,6 +2606,56 @@ async function servePeerAttachment(
   return new Response(upstream.body, { status: upstream.status, headers: responseHeaders });
 }
 
+async function serveCloudinaryRecordingAsset(
+  request: Request,
+  publicId: string,
+  format: string,
+  services: CollaborationServices,
+): Promise<Response> {
+  if (format !== "mp4" && format !== "webm") {
+    return services.jsonResponse(503, { error: "This recording format is not supported." });
+  }
+  const cloudName = process.env.CLOUDINARY_CLOUD_NAME || "";
+  const apiKey = process.env.CLOUDINARY_API_KEY || "";
+  if (!cloudName || !apiKey || !process.env.CLOUDINARY_API_SECRET) {
+    return services.jsonResponse(503, { error: "Recording storage is not configured." });
+  }
+  const timestamp = String(Math.floor(Date.now() / 1000));
+  const parameters = {
+    public_id: publicId,
+    format,
+    type: "authenticated",
+    timestamp,
+    expires_at: String(Math.floor(Date.now() / 1000) + 60),
+  };
+  const query = new URLSearchParams({
+    ...parameters,
+    api_key: apiKey,
+    signature: services.cloudinaryParameterSignature(parameters),
+  });
+  const headers = new Headers();
+  const range = request.headers.get("range");
+  if (range) headers.set("Range", range);
+  const upstream = await fetch(
+    `https://api.cloudinary.com/v1_1/${encodeURIComponent(cloudName)}/video/download?${query}`,
+    { headers, signal: AbortSignal.timeout(30000), redirect: "follow" },
+  );
+  if (!upstream.ok || !upstream.body) {
+    services.safeLogFailure("Class recording playback", new Error(`Storage returned ${upstream.status}`));
+    return services.jsonResponse(503, { error: "This recording is temporarily unavailable." });
+  }
+  const responseHeaders = new Headers({
+    "Cache-Control": "private, no-store",
+    "Content-Type": format === "webm" ? "video/webm" : "video/mp4",
+    "X-Content-Type-Options": "nosniff",
+  });
+  for (const name of ["content-length", "content-range", "accept-ranges"]) {
+    const value = upstream.headers.get(name);
+    if (value) responseHeaders.set(name, value);
+  }
+  return new Response(upstream.body, { status: upstream.status, headers: responseHeaders });
+}
+
 async function serveRecording(
   request: Request,
   sessionId: string,
@@ -2575,48 +2689,46 @@ async function serveRecording(
   );
   const recording = access.rows[0];
   if (!recording) return services.jsonResponse(404, { error: "This recording is unavailable for your account." });
-  if (recording.format !== "mp4" && recording.format !== "webm") {
-    return services.jsonResponse(503, { error: "This recording format is not supported." });
+  return serveCloudinaryRecordingAsset(request, recording.public_id, recording.format, services);
+}
+
+async function serveRecordingPart(
+  request: Request,
+  sessionId: string,
+  partNumber: number,
+  account: CollaborationAccount,
+  services: CollaborationServices,
+): Promise<Response> {
+  if (!isUuid(sessionId) || !Number.isInteger(partNumber) || partNumber < 1 || partNumber > 100) {
+    return services.jsonResponse(404, { error: "This recording part was not found." });
   }
-  const cloudName = process.env.CLOUDINARY_CLOUD_NAME || "";
-  const apiKey = process.env.CLOUDINARY_API_KEY || "";
-  if (!cloudName || !apiKey || !process.env.CLOUDINARY_API_SECRET) {
-    return services.jsonResponse(503, { error: "Recording storage is not configured." });
-  }
-  const timestamp = String(Math.floor(Date.now() / 1000));
-  const parameters = {
-    public_id: recording.public_id,
-    format: recording.format,
-    type: "authenticated",
-    timestamp,
-    expires_at: String(Math.floor(Date.now() / 1000) + 60),
-  };
-  const query = new URLSearchParams({
-    ...parameters,
-    api_key: apiKey,
-    signature: services.cloudinaryParameterSignature(parameters),
-  });
-  const headers = new Headers();
-  const range = request.headers.get("range");
-  if (range) headers.set("Range", range);
-  const upstream = await fetch(
-    `https://api.cloudinary.com/v1_1/${encodeURIComponent(cloudName)}/video/download?${query}`,
-    { headers, signal: AbortSignal.timeout(30000), redirect: "follow" },
+  const userId = account.role === "administrator" ? null : account.id;
+  const access = await services.pool.query<{ public_id: string }>(
+    `SELECT part.cloudinary_public_id AS public_id
+     FROM tgf_live_sessions session
+     JOIN tgf_live_recordings recording ON recording.session_id = session.id
+     JOIN tgf_live_recording_parts part ON part.recording_id = recording.id
+     WHERE session.id = $1 AND part.part_number = $2
+       AND session.recording_status = 'ready'
+       AND recording.upload_status = 'ready'
+       AND part.upload_status = 'ready'
+       AND part.cloudinary_public_id <> ''
+       AND (
+         $3 = 'administrator' OR
+         ($3 = 'teacher' AND session.teacher_id = $4) OR
+         ($3 = 'learner' AND EXISTS (
+           SELECT 1 FROM tgf_enrollments enrollment
+           WHERE enrollment.user_id = $4 AND enrollment.programme_id = session.programme_id
+             AND enrollment.approval_status = 'approved'
+         ))
+       )`,
+    [sessionId, partNumber, account.role, userId],
   );
-  if (!upstream.ok || !upstream.body) {
-    services.safeLogFailure("Class recording playback", new Error(`Storage returned ${upstream.status}`));
-    return services.jsonResponse(503, { error: "This recording is temporarily unavailable." });
+  const recordingPart = access.rows[0];
+  if (!recordingPart) {
+    return services.jsonResponse(404, { error: "This recording part is unavailable for your account." });
   }
-  const responseHeaders = new Headers({
-    "Cache-Control": "private, no-store",
-    "Content-Type": recording.format === "webm" ? "video/webm" : "video/mp4",
-    "X-Content-Type-Options": "nosniff",
-  });
-  for (const name of ["content-length", "content-range", "accept-ranges"]) {
-    const value = upstream.headers.get(name);
-    if (value) responseHeaders.set(name, value);
-  }
-  return new Response(upstream.body, { status: upstream.status, headers: responseHeaders });
+  return serveCloudinaryRecordingAsset(request, recordingPart.public_id, "webm", services);
 }
 
 async function listNotifications(
@@ -2832,6 +2944,14 @@ async function finalizeRecording(
       [sessionId],
     );
     if (recordingResult.rows[0]?.upload_status === "ready") {
+      await services.pool.query(
+        `UPDATE tgf_live_sessions
+         SET recording_status = 'ready', recording_error = '',
+             recording_hidden_from_admin_at = NULL, recording_hidden_from_teacher_at = NULL,
+             updated_at = NOW()
+         WHERE id = $1 AND ended_at IS NOT NULL`,
+        [sessionId],
+      );
       return services.jsonResponse(200, { uploaded: true, parts: [] });
     }
     return await finalizeRecordingParts(sessionId, session, services, recordingResult.rows[0] || null);
@@ -2853,6 +2973,7 @@ async function finalizeRecordingParts(
   recording: { id: string; upload_status: string } | null,
 ): Promise<Response> {
   if (!recording) {
+    await failRecording(sessionId, "No recording chunks reached the server. Check the tutor's local recording queue before dismissing this entry.", services);
     return services.jsonResponse(409, { error: "No recording chunks were received from this class." });
   }
   await services.pool.query(
@@ -2874,6 +2995,7 @@ async function finalizeRecordingParts(
        WHERE session_id = $1`,
       [sessionId],
     );
+    await failRecording(sessionId, "Cloudinary is not configured. Recording chunks remain available.", services);
     return services.jsonResponse(503, { error: "Cloudinary is not configured. Recording chunks remain available." });
   }
 
@@ -2910,15 +3032,26 @@ async function finalizeRecordingParts(
       for (let attempt = 0; attempt < 3; attempt += 1) {
         try {
           const publicId = `tgfvp/live-classes/${sessionId}/part-${part.part_number}`;
-          uploaded = await cloudinary.uploader.upload_large(filePath, {
-            resource_type: "video",
-            public_id: publicId,
-            overwrite: true,
-            invalidate: true,
-            chunk_size: 5 * 1024 * 1024,
-            filename_override: `${part.part_title}.webm`,
-            tags: ["tgfvp", "live-class", session.course_title],
-          }) as unknown as { secure_url?: string; public_id?: string };
+          uploaded = await new Promise<{ secure_url?: string; public_id?: string }>((resolve, reject) => {
+            cloudinary.uploader.upload_large(
+              filePath,
+              {
+                resource_type: "video",
+                type: "authenticated",
+                public_id: publicId,
+                overwrite: true,
+                invalidate: true,
+                chunk_size: 5 * 1024 * 1024,
+                filename_override: `${part.part_title}.webm`,
+                tags: ["tgfvp", "live-class", session.course_title],
+              },
+              (error, result) => {
+                if (error) reject(error);
+                else if (!result) reject(new Error("Cloudinary returned no upload result."));
+                else resolve(result);
+              },
+            );
+          });
           break;
         } catch (uploadError) {
           if (attempt === 2) throw uploadError;
@@ -2946,7 +3079,7 @@ async function finalizeRecordingParts(
     }
   }
 
-  const allPartsReady = uploadedParts.length === parts.rows.length;
+  const allPartsReady = parts.rows.length > 0 && uploadedParts.length === parts.rows.length;
   await services.pool.query(
     `UPDATE tgf_live_recordings
      SET upload_status = $2, updated_at = NOW(),
@@ -2956,7 +3089,36 @@ async function finalizeRecordingParts(
   );
 
   if (allPartsReady) {
+    await services.pool.query(
+      `UPDATE tgf_live_sessions
+       SET recording_status = 'ready', recording_error = '',
+           recording_hidden_from_admin_at = NULL, recording_hidden_from_teacher_at = NULL,
+           updated_at = NOW()
+       WHERE id = $1 AND ended_at IS NOT NULL`,
+      [sessionId],
+    );
     await rm(directory, { recursive: true, force: true });
+    const completed = await services.pool.query<{
+      programme_id: string;
+      programme_title: string;
+      teacher_id: string;
+      teacher_name: string;
+    }>(
+      `SELECT session.programme_id, programme.title AS programme_title,
+              session.teacher_id, teacher.full_name AS teacher_name
+       FROM tgf_live_sessions session
+       JOIN tgf_programmes programme ON programme.id = session.programme_id
+       JOIN tgf_users teacher ON teacher.id = session.teacher_id
+       WHERE session.id = $1`,
+      [sessionId],
+    );
+    if (completed.rows[0]) {
+      await distributeCompletedRecording(sessionId, completed.rows[0], services);
+    }
+    await publishCollaborationEvent(services.pool, session.teacher_id, "recording-ready", sessionId);
+    await publishCollaborationEvent(services.pool, "administrator", "recording-ready", sessionId);
+  } else {
+    await failRecording(sessionId, "One or more recording parts failed to upload. Retry from the tutor's live-class page.", services);
   }
   return services.jsonResponse(allPartsReady ? 200 : 502, allPartsReady
     ? { uploaded: true, parts: uploadedParts }
@@ -3141,6 +3303,14 @@ export async function handleCollaborationRequest(
         segments.slice(0, 3).join("/") === "api/collaboration/sessions" &&
         segments[4] === "video" && request.method === "GET") {
       return await serveRecording(request, segments[3], account, services);
+    }
+    if (segments.length === 6 &&
+        segments.slice(0, 3).join("/") === "api/collaboration/sessions" &&
+        segments[4] === "recording-parts" && request.method === "GET") {
+      if (!/^\d+$/.test(segments[5])) {
+        return services.jsonResponse(404, { error: "This recording part was not found." });
+      }
+      return await serveRecordingPart(request, segments[3], Number(segments[5]), account, services);
     }
     if (pathname.startsWith("/api/collaboration/")) {
       return services.jsonResponse(405, { error: "Method not allowed or route not found." });
