@@ -7288,3 +7288,94 @@
     max-width: 95%;
   }
 }
+
+.livekit-managed-layout .livekit-main-view {
+  min-height: clamp(440px, 68vh, 760px);
+}
+
+.livekit-managed-layout .livekit-main-video {
+  min-height: clamp(440px, 68vh, 760px);
+  object-fit: cover;
+}
+
+.livekit-managed-layout .livekit-main-placeholder {
+  align-content: center;
+  justify-items: center;
+  gap: 12px;
+  padding: 24px;
+  text-align: center;
+}
+
+.livekit-teacher-avatar {
+  display: grid;
+  width: 104px;
+  height: 104px;
+  border: 3px solid rgb(255 255 255 / 70%);
+  border-radius: 50%;
+  place-items: center;
+  background: #d26f35;
+  color: #fff;
+  font-size: 1.8rem;
+  font-weight: 800;
+}
+
+.livekit-managed-layout .livekit-sidebar {
+  display: flex;
+  min-height: 0;
+  flex-direction: column;
+}
+
+.livekit-managed-layout .livekit-roster {
+  min-height: 0;
+}
+
+.livekit-managed-layout .livekit-side-strip {
+  display: flex;
+  max-height: min(68vh, 760px);
+  flex-direction: column;
+  overflow: auto;
+}
+
+.livekit-managed-layout .livekit-side-strip .livekit-student-tile {
+  display: grid;
+  grid-template-columns: minmax(72px, 104px) minmax(0, 1fr);
+  align-items: center;
+  gap: 5px 10px;
+}
+
+.livekit-managed-layout .livekit-side-strip .livekit-student-video-frame {
+  grid-row: span 2;
+  width: 100%;
+}
+
+.livekit-managed-layout .livekit-side-strip .livekit-student-avatar {
+  margin: 0;
+}
+
+.livekit-managed-layout .livekit-main-view audio {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+}
+
+@media (max-width: 760px) {
+  .livekit-managed-layout .livekit-main-view,
+  .livekit-managed-layout .livekit-main-video {
+    min-height: min(56vh, 500px);
+  }
+
+  .livekit-managed-layout .livekit-side-strip {
+    max-height: none;
+    flex-direction: row;
+  }
+
+  .livekit-managed-layout .livekit-side-strip .livekit-student-tile {
+    flex: 0 0 180px;
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .livekit-managed-layout .livekit-side-strip .livekit-student-video-frame {
+    grid-row: auto;
+  }
+}

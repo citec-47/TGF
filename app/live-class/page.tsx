@@ -1,6 +1,6 @@
 import { Suspense } from "react";
 
-import LiveClassRoom from "./room";
+import LiveClassRoom from "./livekit-room";
 
 export const metadata = {
   title: "Live class | TGF Vocational Pathways",

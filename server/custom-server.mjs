@@ -2,7 +2,6 @@ import "dotenv/config";
 import http from "node:http";
 import next from "next";
 import pg from "pg";
-import { createLiveClassSfu } from "./live-class-sfu.js";
 import { purgeExpiredRecordingTrash } from "./recording-trash.js";
 
 const dev = process.env.NODE_ENV !== "production";
@@ -39,13 +38,6 @@ const recordingTrashCleanup = setInterval(async () => {
   }
 }, 60 * 60 * 1000);
 recordingTrashCleanup.unref();
-
-try {
-  await createLiveClassSfu(server, pool);
-} catch (error) {
-  console.error("Mediasoup live-class server unavailable:", error instanceof Error ? error.message : error);
-  console.error("Install the Microsoft Visual C++ runtime on Windows to enable live classes.");
-}
 
 server.listen(port, hostname, () => {
   console.log(`TGF live class server ready at http://localhost:${port}`);

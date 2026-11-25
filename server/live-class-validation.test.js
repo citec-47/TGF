@@ -6,7 +6,7 @@ import {
   isLiveClassUuid,
 } from "./live-class-validation.js";
 
-test("authorizes only the assigned teacher, course-enrolled learners and admins", () => {
+test("authorizes only the assigned teacher, enrolled learners and admins", () => {
   assert.deepEqual(authorizeLiveClassAccess({
     role: "teacher",
     userId: "teacher-1",
@@ -22,7 +22,7 @@ test("authorizes only the assigned teacher, course-enrolled learners and admins"
     enrolled: true,
     invited: false,
     scheduled: false,
-  }).allowed, false);
+  }).allowed, true);
   assert.deepEqual(authorizeLiveClassAccess({
     role: "learner",
     enrolled: true,

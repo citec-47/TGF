@@ -8,14 +8,14 @@ export function isJoinWindowOpen(now, startsAt, endsAt) {
     now <= endsAt;
 }
 
-export function authorizeLiveSessionJoin({ role, userId, teacherId, enrolled, invited = true }) {
+export function authorizeLiveSessionJoin({ role, userId, teacherId, enrolled }) {
   if (role === "teacher") {
     return userId === teacherId
       ? { allowed: true, role: "teacher", status: 200 }
       : { allowed: false, role: null, status: 403 };
   }
   if (role === "learner") {
-    return enrolled && invited
+    return enrolled
       ? { allowed: true, role: "learner", status: 200 }
       : { allowed: false, role: null, status: 403 };
   }

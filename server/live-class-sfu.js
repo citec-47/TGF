@@ -89,14 +89,6 @@ export async function createLiveClassSfu(httpServer, pool) {
         [user.id, session.programme_id],
       );
       if (!enrollment.rowCount) throw new Error("You must be enrolled in this course.");
-      const invite = await pool.query(
-        `SELECT 1
-         FROM tgf_live_session_invites
-         WHERE session_id = $1 AND user_id = $2`,
-        [sessionId, user.id],
-      );
-      const scheduled = Boolean(session.started_at);
-      if (!scheduled && !invite.rowCount) throw new Error("You were not invited to this live class.");
       return { user, session, role: "student" };
     }
     throw new Error("Student, teacher or administrator access is required.");

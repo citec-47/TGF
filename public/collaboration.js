@@ -1442,7 +1442,14 @@
         const liveSessionId = typeof notification.data?.liveSessionId === "string"
           ? notification.data.liveSessionId
           : "";
-        if (liveSessionId) {
+        const recordingSessionId = typeof notification.data?.sessionId === "string"
+          ? notification.data.sessionId
+          : "";
+        if (notification.type === "recording-ready" && recordingSessionId) {
+          const watch = element("a", "small-action", "Watch recording");
+          watch.href = `/api/collaboration/sessions/${encodeURIComponent(recordingSessionId)}/video`;
+          card.append(watch);
+        } else if (liveSessionId) {
           const join = element("a", "small-action", "Join live class");
           join.href = `/live-class?sessionId=${encodeURIComponent(liveSessionId)}`;
           card.append(join);

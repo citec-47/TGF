@@ -18,7 +18,7 @@ export function authorizeLiveClassAccess({
       : { allowed: false, role: null };
   }
   if (role === "administrator") return { allowed: true, role: "administrator" };
-  if (role === "learner" && enrolled && (scheduled || invited)) {
+  if (role === "learner" && enrolled) {
     return { allowed: true, role: "student" };
   }
   return { allowed: false, role: null };
