@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import type { ReactNode } from "react";
+import Script from "next/script";
 import "../styles.css";
 import "../corporate.css";
 import "../admin.css";
@@ -24,7 +25,10 @@ export default function RootLayout({ children }: Readonly<{ children: ReactNode 
           rel="stylesheet"
         />
       </head>
-      <body>{children}</body>
+      <body>
+        {children}
+        <Script src="/language.js" strategy="afterInteractive" />
+      </body>
     </html>
   );
 }

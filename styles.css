@@ -259,6 +259,52 @@ img {
   display: none;
 }
 
+.tgf-language-picker {
+  display: inline-flex;
+  min-width: 0;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 7px;
+  color: var(--ink-soft);
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.tgf-language-picker select {
+  min-width: 88px;
+  min-height: 36px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 6px 8px;
+  background: var(--white);
+  color: var(--ink);
+  font: inherit;
+  cursor: pointer;
+}
+
+.admin-header-actions > .tgf-language-picker {
+  margin-right: 4px;
+}
+
+.livekit-page > .tgf-language-picker {
+  position: absolute;
+  z-index: 20;
+  top: 12px;
+  right: 12px;
+}
+
+.admin-page.is-dark .tgf-language-picker,
+.livekit-page.is-dark .tgf-language-picker {
+  color: var(--admin-text, #f3f0e9);
+}
+
+.admin-page.is-dark .tgf-language-picker select,
+.livekit-page.is-dark .tgf-language-picker select {
+  border-color: var(--admin-border, #403c36);
+  background: var(--admin-surface, #201e1b);
+  color: var(--admin-text, #f3f0e9);
+}
+
 .section-dark {
   position: relative;
   overflow: hidden;
@@ -1628,6 +1674,26 @@ h3 {
     font-size: 10px;
   }
 
+  .tgf-language-picker {
+    gap: 0;
+  }
+
+  .tgf-language-picker > span {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+
+  .tgf-language-picker select {
+    min-width: 76px;
+    min-height: 36px;
+    padding: 5px;
+    font-size: 10px;
+  }
+
   .hero-grid {
     grid-template-columns: 1fr;
     gap: 32px;
@@ -1988,6 +2054,11 @@ h3 {
     min-height: 36px;
     gap: 4px;
     padding: 6px;
+    font-size: 9px;
+  }
+
+  .tgf-language-picker select {
+    min-width: 68px;
     font-size: 9px;
   }
 
