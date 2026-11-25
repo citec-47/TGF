@@ -1248,13 +1248,13 @@ export default function LiveClassRoom() {
           refreshRemoteAudio();
           producerRef.current = {};
         });
-        socket.on("reconnect_attempt", () => {
+        socket.io.on("reconnect_attempt", () => {
           setConnectionQuality("reconnecting");
           void setAudioOnlyMode(true, "reconnecting").catch((reason) => {
             setError(reason instanceof Error ? reason.message : "The connection is unstable.");
           });
         });
-        socket.on("reconnect", () => {
+        socket.io.on("reconnect", () => {
           setConnectionQuality("reconnecting");
           setNotice("Connection restored. Switching video back on when stable.");
           void new Promise<any>((resolve) => {
