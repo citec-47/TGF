@@ -26,6 +26,9 @@ import {
   getPrivateRecordingStorage,
   isLiveRecordingObjectKey,
   publishLiveClassChatMessage,
+  publishLiveClassControlEvent,
+  listLiveKitRoomParticipants,
+  setLiveKitParticipantMicrophonePermission,
   startLiveKitRecording,
   stopLiveKitRecording,
   verifyLiveKitWebhook,
@@ -2109,11 +2112,17 @@ async function joinInstantSession(
     started_at: Date | null;
     ended_at: Date | null;
     recording_status: string;
+    microphone_allowed: boolean;
     server_now: Date;
   }>(
     `SELECT session.room_name, session.programme_id, programme.title AS programme_title,
             session.teacher_id, teacher.full_name AS teacher_name,
             session.started_at, session.ended_at, session.recording_status,
+            COALESCE((
+              SELECT attendance.microphone_allowed
+              FROM tgf_live_session_attendance attendance
+              WHERE attendance.session_id = session.id AND attendance.user_id = $2
+            ), FALSE) AS microphone_allowed,
             NOW() AS server_now
      FROM tgf_live_sessions session
      JOIN tgf_programmes programme ON programme.id = session.programme_id
@@ -2122,7 +2131,7 @@ async function joinInstantSession(
        AND teacher.role = 'teacher' AND teacher.account_status = 'active'
        AND teacher.is_frozen = FALSE
      WHERE session.id = $1 AND session.timetable_slot_id IS NULL`,
-    [sessionId],
+    [sessionId, account.id],
   );
   const session = result.rows[0];
   if (!session) return services.jsonResponse(404, { error: "This live class is unavailable." });
@@ -2156,35 +2165,31 @@ async function joinInstantSession(
         : "Student, tutor, or administrator access is required.";
     return services.jsonResponse(authorization.status, { error: message });
   }
-  if (authorization.role === "learner" &&
-      (!session.started_at || session.recording_status !== "recording")) {
-    if (session.recording_status === "failed") {
-      return services.jsonResponse(503, {
-        error: "The tutor could not start the browser recording. Please wait for the tutor to resolve it.",
-      });
-    }
-    return services.jsonResponse(200, {
-      waitingForTeacher: true,
-      role: authorization.role,
-      sessionId,
-      roomName: session.room_name,
-      programmeTitle: session.programme_title,
-      teacherName: session.teacher_name,
-      teacherId: session.teacher_id,
-      serverNow: session.server_now,
-    });
-  }
-
-  return services.jsonResponse(200, {
-    transport: "livekit",
-    serverUrl: getLiveKitConfig().publicUrl,
-    token: await createLiveKitParticipantToken({
+  let serverUrl: string;
+  let token: string;
+  try {
+    serverUrl = getLiveKitConfig().publicUrl;
+    token = await createLiveKitParticipantToken({
       identity: account.id,
       name: account.full_name,
       roomName: session.room_name,
       role: authorization.role,
-    }),
+      microphoneAllowed: authorization.role !== "learner" || session.microphone_allowed,
+    });
+  } catch (error) {
+    services.safeLogFailure("LiveKit participant credential issuance", error);
+    return services.jsonResponse(503, {
+      error: "Live video is not configured correctly. Contact your administrator and ask them to check the LiveKit settings.",
+    });
+  }
+  return services.jsonResponse(200, {
+    transport: "livekit",
+    serverUrl,
+    token,
     role: authorization.role,
+    microphoneAllowed: authorization.role !== "learner" || session.microphone_allowed,
+    waitingForTeacher: authorization.role === "learner" && !session.started_at,
+    recordingAvailable: session.recording_status === "recording",
     sessionId,
     roomName: session.room_name,
     programmeTitle: session.programme_title,
@@ -2206,13 +2211,15 @@ async function startLiveSession(
   }
   const sessionResult = await services.pool.query<{
     room_name: string;
+    programme_id: string;
     teacher_id: string;
     started_at: Date | null;
     ended_at: Date | null;
     recording_status: string;
     egress_id: string;
   }>(
-    `SELECT session.room_name, session.teacher_id, session.started_at, session.ended_at,
+    `SELECT session.room_name, session.programme_id, session.teacher_id,
+            session.started_at, session.ended_at,
             session.recording_status, session.egress_id
      FROM tgf_live_sessions session
      LEFT JOIN tgf_course_timetable_slots slot ON slot.id = session.timetable_slot_id
@@ -2227,35 +2234,47 @@ async function startLiveSession(
     return services.jsonResponse(403, { error: "Only the assigned tutor can start this class." });
   }
   if (session.ended_at) return services.jsonResponse(409, { error: "This class has already ended." });
-  if (session.started_at && session.recording_status === "recording" && session.egress_id) {
-    return services.jsonResponse(200, { started: true, startedAt: session.started_at });
+  if (session.started_at) {
+    return services.jsonResponse(200, {
+      started: true,
+      startedAt: session.started_at,
+      recordingAvailable: session.recording_status === "recording" && Boolean(session.egress_id),
+    });
   }
-  if (session.started_at || session.egress_id) {
+  if (session.egress_id) {
     return services.jsonResponse(409, { error: "This class has already started or its recording needs administrator review." });
   }
 
-  const objectKey = createLiveRecordingObjectKey(sessionId);
+  let objectKey = "";
   let egressId = "";
+  let recordingAvailable = false;
   try {
+    objectKey = createLiveRecordingObjectKey(sessionId);
     const egress = await startLiveKitRecording(session.room_name, objectKey);
     egressId = egress.egressId;
     if (!egressId) throw new Error("LiveKit did not return an egress ID.");
-    const started = await services.pool.query<{ started_at: Date }>(
+    recordingAvailable = true;
+  } catch (error) {
+    services.safeLogFailure("LiveKit class recording start", error);
+  }
+
+  let started: { rows: { started_at: Date }[]; rowCount: number | null };
+  try {
+    started = await services.pool.query<{ started_at: Date }>(
       `UPDATE tgf_live_sessions
-       SET started_at = NOW(), recording_status = 'recording',
-           recording_provider = 'livekit', recording_storage_key = $2,
-           egress_id = $3, recording_error = '', updated_at = NOW()
+       SET started_at = NOW(),
+           recording_status = CASE WHEN $2 = '' THEN 'failed' ELSE 'recording' END,
+           recording_provider = 'livekit', recording_storage_key = $3,
+           egress_id = $2,
+           recording_error = CASE WHEN $2 = ''
+             THEN 'LiveKit could not start the private recording. The class is continuing without a recording.'
+             ELSE '' END,
+           updated_at = NOW()
        WHERE id = $1 AND room_name = $4 AND ended_at IS NULL
          AND started_at IS NULL AND egress_id = ''
        RETURNING started_at`,
-      [sessionId, objectKey, egressId, session.room_name],
+      [sessionId, egressId, objectKey, session.room_name],
     );
-    if (!started.rowCount || !started.rows[0]) {
-      await stopLiveKitRecording(egressId);
-      return services.jsonResponse(409, { error: "This class could not be started. Refresh and try again." });
-    }
-    await publishCollaborationEvent(services.pool, "administrator", "recording-started", sessionId);
-    return services.jsonResponse(200, { started: true, startedAt: started.rows[0].started_at });
   } catch (error) {
     if (egressId) {
       try {
@@ -2264,17 +2283,49 @@ async function startLiveSession(
         services.safeLogFailure("LiveKit egress cleanup after start failure", cleanupError);
       }
     }
-    await services.pool.query(
-      `UPDATE tgf_live_sessions
-       SET recording_status = 'failed', recording_error = $2, updated_at = NOW()
-       WHERE id = $1 AND started_at IS NULL AND ended_at IS NULL`,
-      [sessionId, "LiveKit could not start the private class recording."],
-    );
-    services.safeLogFailure("LiveKit class recording start", error);
-    return services.jsonResponse(503, {
-      error: "The class could not start because its automatic private recording is unavailable. Check LiveKit and private-storage setup, then retry.",
-    });
+    throw error;
   }
+  if (!started.rowCount || !started.rows[0]) {
+    if (egressId) {
+      try {
+        await stopLiveKitRecording(egressId);
+      } catch (cleanupError) {
+        services.safeLogFailure("LiveKit egress cleanup after a concurrent class start", cleanupError);
+      }
+    }
+    return services.jsonResponse(409, { error: "This class could not be started. Refresh and try again." });
+  }
+
+  const enrolledStudents = await services.pool.query<{ user_id: string }>(
+    `SELECT enrollment.user_id
+     FROM tgf_enrollments enrollment
+     JOIN tgf_users learner ON learner.id = enrollment.user_id
+       AND learner.role = 'learner' AND learner.account_status = 'active'
+       AND learner.is_frozen = FALSE
+     WHERE enrollment.programme_id = $1 AND enrollment.approval_status = 'approved'`,
+    [session.programme_id],
+  );
+  await Promise.all(enrolledStudents.rows.map(({ user_id }) =>
+    publishCollaborationEvent(services.pool, user_id, "live-session-started", sessionId)));
+  await publishCollaborationEvent(services.pool, "administrator", "recording-started", sessionId);
+
+  let liveSignalDelivered = true;
+  try {
+    await publishLiveClassControlEvent(session.room_name, {
+      type: "started",
+      sessionId,
+      recordingAvailable,
+    });
+  } catch (error) {
+    liveSignalDelivered = false;
+    services.safeLogFailure("LiveKit class-start signal", error);
+  }
+  return services.jsonResponse(200, {
+    started: true,
+    startedAt: started.rows[0].started_at,
+    recordingAvailable,
+    liveSignalDelivered,
+  });
 }
 
 async function endLiveSession(
@@ -2317,10 +2368,6 @@ async function endLiveSession(
     if (session.ended_at) {
       await client.query("COMMIT");
       return services.jsonResponse(200, { ended: true });
-    }
-    if (!session.egress_id) {
-      await client.query("ROLLBACK");
-      return services.jsonResponse(409, { error: "This class has no active automatic recording to end." });
     }
     const inviteResult = await client.query<{ user_id: string }>(
       "SELECT user_id FROM tgf_live_session_invites WHERE session_id = $1",
@@ -2366,7 +2413,7 @@ async function endLiveSession(
     client.release();
   }
   try {
-    await stopLiveKitRecording(egressId);
+    if (egressId) await stopLiveKitRecording(egressId);
     await deleteLiveKitRoom(roomName);
   } catch (error) {
     await services.pool.query(
@@ -2380,7 +2427,7 @@ async function endLiveSession(
     );
     services.safeLogFailure("LiveKit class recording stop", error);
     return services.jsonResponse(503, {
-      error: "The class has ended, but LiveKit could not confirm recording completion. Contact an administrator.",
+      error: "The class has ended, but LiveKit could not close the room cleanly. Contact an administrator.",
     });
   }
   await Promise.all([account.id, ...invitedStudents].map((recipient) =>
@@ -2394,6 +2441,7 @@ async function getSessionForAttendance(
   services: CollaborationServices,
 ): Promise<{
   session?: {
+    room_name: string;
     teacher_id: string;
     programme_id: string;
     started_at: Date | null;
@@ -2402,12 +2450,13 @@ async function getSessionForAttendance(
   response?: Response;
 }> {
   const result = await services.pool.query<{
+    room_name: string;
     teacher_id: string;
     programme_id: string;
     started_at: Date | null;
     ended_at: Date | null;
   }>(
-    `SELECT teacher_id, programme_id, started_at, ended_at
+    `SELECT room_name, teacher_id, programme_id, started_at, ended_at
      FROM tgf_live_sessions
      WHERE id = $1`,
     [sessionId],
@@ -2473,6 +2522,14 @@ async function updateSessionAttendance(
   } else {
     await markLiveSessionParticipantLeft(services.pool, sessionId, account.id);
   }
+  try {
+    await publishLiveClassControlEvent(access.session.room_name, {
+      type: "attendance-updated",
+      sessionId,
+    });
+  } catch (error) {
+    services.safeLogFailure("LiveKit attendance signal", error);
+  }
   return services.jsonResponse(200, { updated: true });
 }
 
@@ -2482,8 +2539,8 @@ async function updateParticipantMicrophone(
   account: CollaborationAccount,
   services: CollaborationServices,
 ): Promise<Response> {
-  if (account.role !== "teacher") {
-    return services.jsonResponse(403, { error: "Only the class tutor can manage microphones." });
+  if (account.role !== "teacher" && account.role !== "administrator") {
+    return services.jsonResponse(403, { error: "Only the tutor or an administrator can manage microphones." });
   }
   const body = await readJson(request);
   const participantId = typeof body.userId === "string" ? body.userId : "";
@@ -2491,8 +2548,14 @@ async function updateParticipantMicrophone(
   if ((participantId !== "all" && !isUuid(participantId)) || typeof allowMicrophone !== "boolean") {
     return services.jsonResponse(400, { error: "Choose a student and whether to allow their microphone." });
   }
-  const sessionQuery = await services.pool.query<{ teacher_id: string; programme_id: string }>(
-    `SELECT teacher_id, programme_id
+  const sessionQuery = await services.pool.query<{
+    room_name: string;
+    teacher_id: string;
+    programme_id: string;
+    started_at: Date | null;
+    ended_at: Date | null;
+  }>(
+    `SELECT room_name, teacher_id, programme_id, started_at, ended_at
      FROM tgf_live_sessions
      WHERE id = $1`,
     [sessionId],
@@ -2502,29 +2565,104 @@ async function updateParticipantMicrophone(
   if (account.role === "teacher" && account.id !== session.teacher_id) {
     return services.jsonResponse(403, { error: "Only the assigned tutor can manage this class." });
   }
-  let updated = 0;
-  if (participantId === "all") {
-    updated = await services.pool.query(
-      `SELECT COUNT(*)::int AS count
-       FROM tgf_enrollments
-       WHERE programme_id = $1 AND approval_status = 'approved'`,
-      [session.programme_id],
-    ).then((result) => Number(result.rows[0]?.count || 0));
-  } else {
-    if (!isUuid(participantId)) {
-      return services.jsonResponse(400, { error: "Choose a valid student." });
-    }
+  if (!session.started_at || session.ended_at) {
+    return services.jsonResponse(409, { error: "Microphone controls are available only while the class is live." });
+  }
+
+  let liveParticipants: Awaited<ReturnType<typeof listLiveKitRoomParticipants>>;
+  try {
+    liveParticipants = await listLiveKitRoomParticipants(session.room_name);
+  } catch (error) {
+    services.safeLogFailure("LiveKit participant microphone lookup", error);
+    return services.jsonResponse(503, {
+      error: "The live room could not be reached. Check the LiveKit connection and try again.",
+    });
+  }
+  const activeIds = liveParticipants
+    .map(({ identity }) => identity)
+    .filter((identity) => identity !== session.teacher_id && isUuid(identity));
+  const eligible = await services.pool.query<{ user_id: string }>(
+    `SELECT DISTINCT enrollment.user_id
+     FROM tgf_enrollments enrollment
+     JOIN tgf_users learner ON learner.id = enrollment.user_id
+       AND learner.role = 'learner' AND learner.account_status = 'active'
+       AND learner.is_frozen = FALSE
+     WHERE enrollment.programme_id = $1
+       AND enrollment.approval_status = 'approved'
+       AND enrollment.user_id = ANY($2::uuid[])`,
+    [session.programme_id, activeIds],
+  );
+  const activeStudentIds = eligible.rows.map(({ user_id }) => user_id);
+  const targetIds = participantId === "all"
+    ? activeStudentIds
+    : [participantId];
+
+  if (participantId !== "all" && !activeStudentIds.includes(participantId)) {
     const enrolled = await services.pool.query(
-      `SELECT 1 FROM tgf_enrollments
-       WHERE user_id = $1 AND programme_id = $2 AND approval_status = 'approved'`,
+      `SELECT 1
+       FROM tgf_enrollments enrollment
+       JOIN tgf_users learner ON learner.id = enrollment.user_id
+         AND learner.role = 'learner' AND learner.account_status = 'active'
+         AND learner.is_frozen = FALSE
+       WHERE enrollment.user_id = $1 AND enrollment.programme_id = $2
+         AND enrollment.approval_status = 'approved'`,
       [participantId, session.programme_id],
     );
     if (!enrolled.rowCount) {
-      return services.jsonResponse(403, { error: "Only an enrolled student can be unmuted." });
+      return services.jsonResponse(403, { error: "Only an active, enrolled student can be managed." });
+    }
+    return services.jsonResponse(404, { error: "That student is no longer connected to this class." });
+  }
+
+  let updated = 0;
+  for (const studentId of targetIds) {
+    await markLiveSessionParticipantJoined(services.pool, sessionId, studentId);
+    try {
+      await setLiveKitParticipantMicrophonePermission(
+        session.room_name,
+        studentId,
+        allowMicrophone,
+      );
+    } catch (error) {
+      services.safeLogFailure("LiveKit student microphone permission update", error);
+      const partialUpdate = updated > 0
+        ? ` The permission was changed for ${updated} student${updated === 1 ? "" : "s"} before the failure.`
+        : "";
+      return services.jsonResponse(503, {
+        error: `Could not ${allowMicrophone ? "allow" : "mute"} ${targetIds.length === 1 ? "the student's" : "all students'"} microphone. Try again.${partialUpdate}`,
+        updated,
+      });
+    }
+    await services.pool.query(
+      `UPDATE tgf_live_session_attendance
+       SET microphone_allowed = $3
+       WHERE session_id = $1 AND user_id = $2 AND participant_role = 'learner'`,
+      [sessionId, studentId, allowMicrophone],
+    );
+    try {
+      await publishLiveClassControlEvent(session.room_name, {
+        type: "microphone",
+        sessionId,
+        userId: studentId,
+        microphoneAllowed: allowMicrophone,
+      });
+    } catch (error) {
+      services.safeLogFailure("LiveKit microphone-state signal", error);
     }
     updated += 1;
   }
-  return services.jsonResponse(200, { updated });
+  if (participantId === "all") {
+    await services.pool.query(
+      `UPDATE tgf_live_session_attendance
+       SET microphone_allowed = $2
+       WHERE session_id = $1 AND participant_role = 'learner'`,
+      [sessionId, allowMicrophone],
+    );
+  }
+  return services.jsonResponse(200, {
+    updated,
+    microphoneAllowed: allowMicrophone,
+  });
 }
 
 async function handleLiveKitWebhook(
@@ -3940,6 +4078,15 @@ export async function handleCollaborationRequest(
     }
     return null;
   } catch (error) {
-    return errorResponse(services, "Collaboration API", error, "The collaboration request could not be completed.");
+    const liveClassRequest = segments[2] === "live-sessions" || segments[2] === "sessions";
+    const fallback = liveClassRequest
+      ? "The classroom service is temporarily unavailable. Retry once; if the issue continues, ask an administrator to check the database migrations and LiveKit configuration."
+      : "The collaboration service is temporarily unavailable. Retry once; if the issue continues, contact an administrator.";
+    return errorResponse(
+      services,
+      `Collaboration API ${request.method} ${segments.slice(0, 4).join("/")}`,
+      error,
+      fallback,
+    );
   }
 }

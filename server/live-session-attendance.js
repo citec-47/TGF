@@ -1,8 +1,8 @@
 export async function markLiveSessionParticipantJoined(pool, sessionId, participantId) {
   const result = await pool.query(
     `INSERT INTO tgf_live_session_attendance
-       (session_id, user_id, first_joined_at, current_joined_at, last_left_at, total_seconds)
-     SELECT session.id, learner.id, NOW(), NOW(), NULL, 0
+       (session_id, user_id, participant_role, first_joined_at, current_joined_at, last_left_at, total_seconds)
+     SELECT session.id, learner.id, 'learner', NOW(), NOW(), NULL, 0
      FROM tgf_live_sessions session
      JOIN tgf_users learner ON learner.id = $2
        AND learner.role = 'learner' AND learner.account_status = 'active'
@@ -35,7 +35,8 @@ export async function markLiveSessionParticipantLeft(pool, sessionId, participan
 
 export async function listLiveSessionAttendees(pool, sessionId) {
   const result = await pool.query(
-    `SELECT attendance.user_id, learner.full_name,
+    `SELECT attendance.user_id, attendance.participant_role, attendance.microphone_allowed,
+            learner.full_name,
             attendance.first_joined_at,
             attendance.total_seconds +
               CASE WHEN attendance.current_joined_at IS NOT NULL
@@ -56,6 +57,8 @@ export async function listLiveSessionAttendees(pool, sessionId) {
     return {
       id: row.user_id,
       name: row.full_name,
+      role: row.participant_role,
+      microphoneAllowed: row.microphone_allowed,
       firstJoinedAt: firstJoinedAt.toISOString(),
       attendanceSeconds: Number(row.attendance_seconds),
     };

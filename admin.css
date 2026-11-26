@@ -7489,3 +7489,120 @@
     grid-row: auto;
   }
 }
+
+.livekit-main-video.is-screen-share {
+  object-fit: contain;
+  background: #0d0f0d;
+}
+
+.livekit-main-view.is-active-speaker {
+  outline: 2px solid #d26f35;
+  outline-offset: 2px;
+}
+
+.livekit-stage-caption {
+  position: absolute;
+  z-index: 2;
+  right: 12px;
+  bottom: 12px;
+  margin: 0;
+  border-radius: 999px;
+  padding: 6px 10px;
+  background: rgb(0 0 0 / 65%);
+  color: #fff;
+  font-size: 0.78rem;
+}
+
+.livekit-host-controls,
+.livekit-student-tile-actions,
+.livekit-participant-pagination {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+
+.livekit-host-controls {
+  margin-bottom: 10px;
+}
+
+.livekit-host-controls .button,
+.livekit-student-tile-actions .button,
+.livekit-participant-pagination .button {
+  min-height: 36px;
+  padding: 7px 10px;
+  font-size: 0.75rem;
+}
+
+.livekit-student-tile.is-active-speaker {
+  border-color: #d26f35;
+  box-shadow: 0 0 0 2px rgb(210 111 53 / 20%);
+}
+
+.livekit-student-tile.is-pinned {
+  border-color: #a64e1f;
+}
+
+.livekit-student-tile-actions {
+  justify-content: flex-start;
+}
+
+.livekit-mic-state {
+  display: flex !important;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+}
+
+.livekit-network-state {
+  color: #4a6651;
+  font-size: 0.7rem;
+}
+
+.livekit-network-state.is-poor,
+.livekit-network-state.is-lost {
+  color: #a33d2e;
+}
+
+.livekit-network-state.is-unknown {
+  color: var(--admin-ink-soft);
+}
+
+.livekit-participant-pagination {
+  justify-content: center;
+  margin-top: 10px;
+  color: var(--admin-ink-soft);
+  font-size: 0.78rem;
+}
+
+.livekit-mic-permission {
+  align-self: center;
+  color: #a33d2e;
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+.livekit-page.is-dark .livekit-network-state {
+  color: #a5c5a9;
+}
+
+.livekit-page.is-dark .livekit-network-state.is-poor,
+.livekit-page.is-dark .livekit-network-state.is-lost,
+.livekit-page.is-dark .livekit-mic-permission {
+  color: #f0a08d;
+}
+
+@media (max-width: 760px) {
+  .livekit-stage-caption {
+    right: 8px;
+    bottom: 8px;
+  }
+
+  .livekit-managed-layout .livekit-student-tile-actions .button {
+    min-height: 40px;
+  }
+
+  .livekit-participant-pagination .button {
+    min-height: 44px;
+  }
+}

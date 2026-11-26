@@ -1,4 +1,6 @@
-export const LIVE_CLASS_CHAT_TOPIC = "tgf-live-class-chat";
+import { LIVE_CLASS_CHAT_TOPIC } from "../lib/live-class-events.js";
+
+export { LIVE_CLASS_CHAT_TOPIC };
 export const LIVE_CLASS_CHAT_MAX_BODY_LENGTH = 2000;
 
 export function isLiveClassChatMessageId(value) {

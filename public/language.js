@@ -1374,7 +1374,7 @@
   }
 
   function updateResponsiveLanguageControl() {
-    const wrapper = document.querySelector(".site-header .tgf-language-picker");
+    const wrapper = document.querySelector(".tgf-language-picker");
     const header = document.querySelector(".site-header .header-inner");
     const footerSlot = document.querySelector("[data-tgf-footer-language]");
     if (!wrapper || !header) return;

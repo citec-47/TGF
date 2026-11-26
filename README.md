@@ -104,15 +104,28 @@ teacher for approval or feedback; this review does not change module access.
 
 ## Managed live classes and private recordings
 
-Live classes use LiveKit Cloud for the managed video room and Egress service.
-The app's custom React layout keeps the tutor on the large stage and the class
-participants in a side strip. PostgreSQL-backed server checks issue room-scoped
-tokens only to the assigned tutor, active administrators, and students with an
-approved course enrollment. Students can wait for the tutor to start; a
-separate invitation is not required. The room reports connection, reconnect,
-waiting and failure states. Class chat is persisted per session, authorized
-using the same course enrollment, and delivered through reliable LiveKit room
-data; messages load from the server after joining or refreshing.
+Live classes use LiveKit Cloud for managed WebRTC rooms and optional Egress
+recordings. The responsive React classroom puts the tutor or tutor screen share
+on the main stage and participants in a paginated side strip. PostgreSQL-backed
+server checks issue room-scoped tokens only to the assigned tutor, active
+administrators, and students with an approved course enrollment. Students can
+join the room while waiting for the tutor; the client rechecks current class
+state after subscribing to room events so a missed start event does not strand
+them in the waiting room. The room reports connecting, connected, reconnecting,
+waiting and failed states.
+
+Students join with camera permission but no microphone-publish permission.
+Only the assigned tutor or an administrator can enable or revoke a student's
+microphone through a server-authorized LiveKit permission update. The setting
+is persisted with session attendance and applied to subsequent joins.
+Participant and attendance changes are refreshed in real time. Learner camera
+video starts at low resolution, and the classroom supports manual audio-only
+mode and switches off local video when LiveKit reports a poor connection.
+Camera or video failure does not block audio participation.
+
+Class chat is persisted per session, authorized using the same course
+enrollment, and delivered through reliable LiveKit room data; messages load
+from the server after joining or refreshing.
 
 Chat sender names, role and profile photo are read from the account record.
 Student email addresses are visible only to the sender, tutor and
@@ -120,14 +133,15 @@ administrators by default. Set `LIVE_CLASS_CHAT_SHOW_STUDENT_EMAILS=true` in
 the server environment only if you explicitly want every participant to see
 all sender emails.
 
-The tutor starts and ends the session in the classroom. LiveKit Egress records
-the room to a private S3-compatible bucket (Cloudflare R2 is the recommended
-low-cost option). The app only marks a recording ready after Egress completes
-and the server verifies the MP4 exists. Playback streams through an
-authenticated server endpoint that rechecks the viewer's role/enrollment; the
-bucket must not be made public. Enrolled students, the assigned tutor, and
-administrators receive in-app notifications and, when SMTP is configured,
-recording-ready emails.
+The tutor starts and ends the session in the classroom. When Egress and private
+object storage are configured, LiveKit records the room to an S3-compatible
+bucket (Cloudflare R2 is the recommended low-cost option). Recording failure
+does not prevent the live lesson from starting. The app only marks a recording
+ready after Egress completes and the server verifies the MP4 exists. Playback
+streams through an authenticated server endpoint that rechecks the viewer's
+role/enrollment; the bucket must not be made public. Enrolled students, the
+assigned tutor, and administrators receive in-app notifications and, when
+SMTP is configured, recording-ready emails.
 
 ### Provider and storage setup
 
@@ -164,9 +178,10 @@ recording-ready emails.
    configuration is logged by the server.
 6. Run `npm run db:migrate` against the production `DATABASE_URL` to apply
    migration `040_livekit_recordings.sql` and any other pending migrations,
-   including `041_live_session_chat.sql`, then restart the Node server. Keep `DATABASE_URL`, `SESSION_SECRET`, and all
-   provider credentials server-side. Do not add them to `NEXT_PUBLIC_*`, source
-   files, or Git.
+   including `041_live_session_chat.sql` and
+   `042_live_class_microphone_permissions.sql`, then restart the Node server.
+   Keep `DATABASE_URL`, `SESSION_SECRET`, and all provider credentials
+   server-side. Do not add them to `NEXT_PUBLIC_*`, source files, or Git.
 
 LiveKit Cloud replaces the custom mediasoup SFU and browser-side chunk
 recording, so the app server no longer needs the mediasoup UDP port range or a
@@ -180,15 +195,19 @@ releasing the feature.
 ### Manual live-class verification
 
 1. Sign in as the assigned tutor, open an assigned course class, and start it.
-   Confirm the recording badge appears.
+   Confirm the class starts even if recording is unavailable; when Egress is
+   configured, confirm the recording badge appears.
 2. Join from two separate browsers as active students with approved enrollment.
    Confirm the tutor is large and both student faces appear in the side strip.
 3. Try the same join link as a student without approved enrollment; the server
    must reject the request.
-4. Test mute/unmute, camera off/on, camera-permission denial, reconnecting after
-   a temporary network loss, and Leave class.
-5. End the class as the tutor. Confirm all participants are disconnected and
-   the recording changes from processing to ready after the Egress webhook.
+4. Confirm students join muted and cannot publish microphone audio until the
+   tutor or administrator allows it. Test per-student and all-student mute
+   controls, camera off/on, camera-permission denial, reconnecting after a
+   temporary network loss, audio-only mode, and Leave class.
+5. End the class as the tutor. Confirm all participants are disconnected and,
+   when recording is configured, the recording changes from processing to ready
+   after the Egress webhook.
 6. Verify that approved students, the assigned tutor, and administrators can
    play the recording, and that an unrelated account cannot. Confirm the
    bucket remains private and email/in-app notifications are delivered.

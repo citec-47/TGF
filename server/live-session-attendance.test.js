@@ -18,6 +18,8 @@ test("records an authorized student joining the session", async () => {
   await markLiveSessionParticipantJoined(pool, "session-id", "student-id");
 
   assert.match(query[0], /INSERT INTO tgf_live_session_attendance/);
+  assert.match(query[0], /participant_role/);
+  assert.match(query[0], /'learner'/);
   assert.match(query[0], /ON CONFLICT \(session_id, user_id\)/);
   assert.deepEqual(query[1], ["session-id", "student-id"]);
 });
@@ -52,6 +54,8 @@ test("returns attendee history with API-ready timestamps and durations", async (
       return {
         rows: [{
           user_id: "student-id",
+          participant_role: "learner",
+          microphone_allowed: false,
           full_name: "Student Example",
           first_joined_at: "2025-01-02T03:04:05.000Z",
           attendance_seconds: 125,
@@ -63,6 +67,8 @@ test("returns attendee history with API-ready timestamps and durations", async (
   assert.deepEqual(await listLiveSessionAttendees(pool, "session-id"), [{
     id: "student-id",
     name: "Student Example",
+    role: "learner",
+    microphoneAllowed: false,
     firstJoinedAt: "2025-01-02T03:04:05.000Z",
     attendanceSeconds: 125,
   }]);

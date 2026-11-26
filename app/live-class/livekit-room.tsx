@@ -7,8 +7,13 @@ import {
   Room,
   RoomEvent,
   Track,
+  VideoPresets,
   type Participant,
 } from "livekit-client";
+import {
+  LIVE_CLASS_CHAT_TOPIC,
+  LIVE_CLASS_CONTROL_TOPIC,
+} from "../../lib/live-class-events.js";
 
 interface JoinResponse {
   role?: "teacher" | "learner" | "administrator";
@@ -21,6 +26,8 @@ interface JoinResponse {
   startedAt?: string;
   startsAt?: string;
   waitingForTeacher?: boolean;
+  microphoneAllowed?: boolean;
+  recordingAvailable?: boolean;
   serverUrl?: string;
   token?: string;
 }
@@ -30,6 +37,8 @@ interface SessionAttendee {
   name: string;
   firstJoinedAt: string;
   attendanceSeconds: number;
+  role: "learner" | "teacher" | "administrator";
+  microphoneAllowed: boolean;
 }
 
 interface ParticipantEntry {
@@ -49,6 +58,7 @@ interface LiveClassChatMessage {
 }
 
 type ConnectionStatus = "connecting" | "connected" | "reconnecting" | "failed" | "waiting";
+const PARTICIPANTS_PER_PAGE = 6;
 
 async function postJson<T>(url: string, body?: object): Promise<T> {
   const response = await fetch(url, {
@@ -70,6 +80,29 @@ async function requestJoin(url: string, body: object): Promise<JoinResponse> {
 function initials(name: string): string {
   const parts = name.trim().split(/\s+/).filter(Boolean);
   return parts.slice(0, 2).map((part) => part[0]?.toUpperCase() || "").join("") || "TGF";
+}
+
+function participantRole(participant: Participant): string {
+  try {
+    const metadata = JSON.parse(participant.metadata || "") as { role?: unknown };
+    return typeof metadata.role === "string" ? metadata.role : "";
+  } catch {
+    return "";
+  }
+}
+
+function connectionQualityLabel(quality: ConnectionQuality): string {
+  switch (quality) {
+    case ConnectionQuality.Excellent:
+    case ConnectionQuality.Good:
+      return "Good network";
+    case ConnectionQuality.Poor:
+      return "Weak network";
+    case ConnectionQuality.Lost:
+      return "Reconnecting";
+    default:
+      return "Network status unknown";
+  }
 }
 
 function mergeChatMessages(
@@ -113,13 +146,15 @@ function VideoTrackView({
   participant,
   className,
   muted,
+  source = Track.Source.Camera,
 }: {
   participant: Participant;
   className: string;
   muted: boolean;
+  source?: Track.Source;
 }) {
   const elementRef = useRef<HTMLVideoElement>(null);
-  const track = participant.getTrackPublication(Track.Source.Camera)?.track;
+  const track = participant.getTrackPublication(source)?.track;
 
   useEffect(() => {
     const element = elementRef.current;
@@ -133,11 +168,15 @@ function VideoTrackView({
   return <video ref={elementRef} className={className} autoPlay playsInline muted={muted} />;
 }
 
-function ParticipantAudio({ participant, local }: ParticipantEntry) {
+function ParticipantAudio({
+  participant,
+  local,
+  source = Track.Source.Microphone,
+}: ParticipantEntry & { source?: Track.Source }) {
   const elementRef = useRef<HTMLAudioElement>(null);
   const track = local
     ? undefined
-    : participant.getTrackPublication(Track.Source.Microphone)?.track;
+    : participant.getTrackPublication(source)?.track;
 
   useEffect(() => {
     const element = elementRef.current;
@@ -161,19 +200,27 @@ export default function LiveKitClassRoom() {
   const roomRef = useRef<Room | null>(null);
   const cameraWantedRef = useRef(true);
   const audioOnlyRef = useRef(false);
+  const manualAudioOnlyRef = useRef(false);
   const reconnectTimerRef = useRef<number>(0);
+  const reconnectAttemptsRef = useRef(0);
   const chatMessagesRef = useRef<HTMLDivElement>(null);
   const [retryKey, setRetryKey] = useState(0);
   const [info, setInfo] = useState<JoinResponse | null>(null);
   const [participants, setParticipants] = useState<ParticipantEntry[]>([]);
   const [attendees, setAttendees] = useState<SessionAttendee[]>([]);
+  const [microphonePermissions, setMicrophonePermissions] = useState<Record<string, boolean>>({});
+  const [activeSpeakerId, setActiveSpeakerId] = useState("");
+  const [pinnedParticipantId, setPinnedParticipantId] = useState("");
+  const [participantPage, setParticipantPage] = useState(0);
   const [connected, setConnected] = useState(false);
   const [connecting, setConnecting] = useState(true);
   const [started, setStarted] = useState(false);
   const [ended, setEnded] = useState(false);
+  const [recordingAvailable, setRecordingAvailable] = useState<boolean | null>(null);
   const [busy, setBusy] = useState(false);
   const [cameraOn, setCameraOn] = useState(false);
   const [microphoneOn, setMicrophoneOn] = useState(false);
+  const [screenSharing, setScreenSharing] = useState(false);
   const [audioOnly, setAudioOnly] = useState(false);
   const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>("connecting");
   const [chatMessages, setChatMessages] = useState<LiveClassChatMessage[]>([]);
@@ -207,7 +254,7 @@ export default function LiveKitClassRoom() {
     let intentionalDisconnect = false;
     let attendanceActive = false;
     let attendanceSessionId = "";
-    let waitTimer = 0;
+    let waitingRefreshTimer = 0;
     let attendanceTimer = 0;
     let room: Room | null = null;
     const postAttendance = async (
@@ -240,9 +287,22 @@ export default function LiveKitClassRoom() {
         );
         if (!response.ok) return;
         const result = await response.json() as { attendees?: SessionAttendee[] };
-        if (!cancelled) setAttendees(result.attendees || []);
-      } catch {
-        if (!cancelled) setNotice("Attendance updates are temporarily unavailable.");
+        if (!response.ok) {
+          throw new Error("Attendance could not be refreshed.");
+        }
+        if (!cancelled) {
+          const nextAttendees = result.attendees || [];
+          setAttendees(nextAttendees);
+          setMicrophonePermissions(Object.fromEntries(
+            nextAttendees.map(({ id, microphoneAllowed }) => [id, microphoneAllowed]),
+          ));
+        }
+      } catch (attendanceError) {
+        if (!cancelled) {
+          setNotice(attendanceError instanceof Error
+            ? attendanceError.message
+            : "Attendance updates are temporarily unavailable. The class connection will continue.");
+        }
       }
     };
 
@@ -302,17 +362,48 @@ export default function LiveKitClassRoom() {
         if (cancelled) return;
         setInfo(credentials);
         setStarted(Boolean(credentials.started));
+        setRecordingAvailable(credentials.recordingAvailable ?? null);
         void refreshChat(credentials.sessionId);
-        if (credentials.waitingForTeacher) {
-          setConnecting(false);
-          setConnectionStatus("waiting");
-          setNotice("Your tutor has not started the class yet. This page will join automatically when the class begins.");
-          waitTimer = window.setTimeout(() => void connect(), 3000);
-          return;
-        }
         if (!credentials.serverUrl || !credentials.token) {
-          throw new Error("The video service returned incomplete connection details.");
+          throw new Error("The live video service returned incomplete connection details. Contact your administrator.");
         }
+
+        let roomConnected = false;
+        let startSignalReceived = false;
+        let attendanceRequestPending = false;
+        const recordAttendance = async () => {
+          if (cancelled || attendanceActive || attendanceRequestPending ||
+              credentials.role !== "learner") return;
+          attendanceRequestPending = true;
+          try {
+            await postAttendance(credentials.sessionId, "join");
+            attendanceActive = true;
+            attendanceSessionId = credentials.sessionId;
+          } finally {
+            attendanceRequestPending = false;
+          }
+        };
+        const activateClass = async (recordingIsAvailable?: boolean) => {
+          startSignalReceived = true;
+          window.clearInterval(waitingRefreshTimer);
+          setStarted(true);
+          setInfo((current) => current ? { ...current, started: true } : current);
+          if (recordingIsAvailable !== undefined) setRecordingAvailable(recordingIsAvailable);
+          setConnectionStatus("connected");
+          setNotice("");
+          void refreshChat(credentials.sessionId);
+          if (roomConnected) {
+            try {
+              await recordAttendance();
+            } catch (attendanceError) {
+              if (!cancelled) {
+                setError(attendanceError instanceof Error
+                  ? attendanceError.message
+                  : "Your attendance could not be recorded.");
+              }
+            }
+          }
+        };
 
         room = new Room({ adaptiveStream: true, dynacast: true });
         roomRef.current = room;
@@ -333,13 +424,14 @@ export default function LiveKitClassRoom() {
           setParticipants(nextParticipants);
           setCameraOn(room.localParticipant.isCameraEnabled);
           setMicrophoneOn(room.localParticipant.isMicrophoneEnabled);
+          setScreenSharing(room.localParticipant.isScreenShareEnabled);
           if (credentials.role === "learner" && credentials.started) {
             const teacherPresent = nextParticipants.some(({ participant }) =>
               participant.identity === credentials.teacherId);
             if (!teacherPresent) {
               setNotice("Your tutor is temporarily offline. The class remains active and will reconnect automatically.");
-            } else if (!notice && !audioOnly) {
-              setNotice("");
+            } else {
+              setNotice((current) => current.includes("temporarily offline") ? "" : current);
             }
           }
         };
@@ -391,6 +483,17 @@ export default function LiveKitClassRoom() {
             void refreshAttendees(credentials.sessionId);
           }
         });
+        room.on(RoomEvent.ActiveSpeakersChanged, (speakers) => {
+          const nextSpeakerId = speakers[0]?.identity || "";
+          setActiveSpeakerId(nextSpeakerId);
+          if (process.env.NODE_ENV !== "production") {
+            console.debug("[live-class] active speaker", {
+              sessionId: credentials.sessionId,
+              roomName: credentials.roomName,
+              identity: nextSpeakerId || null,
+            });
+          }
+        });
         room.on(RoomEvent.ConnectionQualityChanged, (quality: ConnectionQuality, participant: Participant) => {
           if (cancelled || participant !== room?.localParticipant) return;
           if (quality === ConnectionQuality.Poor) {
@@ -408,7 +511,8 @@ export default function LiveKitClassRoom() {
                 if (!cancelled) setNotice("Your connection is slow and the camera could not switch off automatically.");
               });
             }
-          } else if (quality === ConnectionQuality.Good || quality === ConnectionQuality.Excellent) {
+          } else if ((quality === ConnectionQuality.Good || quality === ConnectionQuality.Excellent) &&
+              !manualAudioOnlyRef.current) {
             audioOnlyRef.current = false;
             setAudioOnly(false);
             if (cameraWantedRef.current && credentials.role !== "administrator") {
@@ -456,20 +560,56 @@ export default function LiveKitClassRoom() {
         });
         room.on(RoomEvent.Reconnected, () => {
           if (!cancelled) {
+            reconnectAttemptsRef.current = 0;
             setConnected(true);
-            setConnectionStatus("connected");
+            setConnectionStatus(startSignalReceived ? "connected" : "waiting");
             setNotice("");
             refreshParticipants();
             void refreshChat(credentials.sessionId);
           }
         });
         room.on(RoomEvent.DataReceived, (payload, _participant, _kind, topic) => {
-          if (cancelled || topic !== "tgf-live-class-chat") return;
+          if (cancelled) return;
           try {
-            const event = JSON.parse(new TextDecoder().decode(payload)) as { messageId?: unknown };
-            if (typeof event.messageId === "string" &&
+            const event = JSON.parse(new TextDecoder().decode(payload)) as {
+              type?: unknown;
+              sessionId?: unknown;
+              messageId?: unknown;
+              userId?: unknown;
+              microphoneAllowed?: unknown;
+              recordingAvailable?: unknown;
+            };
+            if (topic === LIVE_CLASS_CHAT_TOPIC &&
+                typeof event.messageId === "string" &&
                 /^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i.test(event.messageId)) {
               void refreshChatMessage(credentials.sessionId, event.messageId);
+              return;
+            }
+            if (topic !== LIVE_CLASS_CONTROL_TOPIC ||
+                event.sessionId !== credentials.sessionId) return;
+            if (event.type === "started") {
+              void activateClass(typeof event.recordingAvailable === "boolean"
+                ? event.recordingAvailable
+                : undefined);
+            } else if (event.type === "attendance-updated" &&
+                (credentials.role === "teacher" || credentials.role === "administrator")) {
+              void refreshAttendees(credentials.sessionId);
+            } else if (event.type === "microphone" &&
+                typeof event.userId === "string" &&
+                typeof event.microphoneAllowed === "boolean") {
+              setMicrophonePermissions((current) => ({
+                ...current,
+                [event.userId as string]: event.microphoneAllowed as boolean,
+              }));
+              if (event.userId === credentials.teacherId) return;
+              if (event.userId === room?.localParticipant.identity) {
+                setInfo((current) => current
+                  ? { ...current, microphoneAllowed: event.microphoneAllowed as boolean }
+                  : current);
+                setNotice(event.microphoneAllowed
+                  ? "Your tutor has allowed your microphone."
+                  : "Your tutor has muted your microphone.");
+              }
             }
           } catch (chatEventError) {
             if (process.env.NODE_ENV !== "production") {
@@ -480,6 +620,7 @@ export default function LiveKitClassRoom() {
         room.on(RoomEvent.Disconnected, () => {
           if (cancelled || intentionalDisconnect) return;
           setConnected(false);
+          setParticipants([]);
           setConnectionStatus("reconnecting");
           if (process.env.NODE_ENV !== "production") {
             console.debug("[live-class] room disconnected", {
@@ -495,9 +636,11 @@ export default function LiveKitClassRoom() {
             } else if (!cancelled) {
               setNotice("Connection interrupted. Reconnecting automatically...");
               window.clearTimeout(reconnectTimerRef.current);
+              const delay = Math.min(30_000, 1000 * (2 ** reconnectAttemptsRef.current));
+              reconnectAttemptsRef.current += 1;
               reconnectTimerRef.current = window.setTimeout(() => {
                 if (!cancelled) setRetryKey((key) => key + 1);
-              }, 5000);
+              }, delay);
             }
           }).catch((disconnectError: unknown) => {
             if (cancelled) return;
@@ -508,9 +651,11 @@ export default function LiveKitClassRoom() {
             } else {
               setNotice("Connection interrupted. Reconnecting automatically...");
               window.clearTimeout(reconnectTimerRef.current);
+              const delay = Math.min(30_000, 1000 * (2 ** reconnectAttemptsRef.current));
+              reconnectAttemptsRef.current += 1;
               reconnectTimerRef.current = window.setTimeout(() => {
                 if (!cancelled) setRetryKey((key) => key + 1);
-              }, 5000);
+              }, delay);
             }
           });
         });
@@ -521,21 +666,63 @@ export default function LiveKitClassRoom() {
           return;
         }
         setConnected(true);
+        roomConnected = true;
         setConnecting(false);
-        setConnectionStatus("connected");
-        setNotice("");
+        setConnectionStatus(credentials.started || startSignalReceived ? "connected" : "waiting");
+        setNotice(credentials.started || startSignalReceived
+          ? ""
+          : "Connected to the classroom. Your tutor has not started the lesson yet.");
         refreshParticipants();
         void refreshChat(credentials.sessionId);
+        if (credentials.role === "learner" && credentials.started) await recordAttendance();
+        if (credentials.role === "learner" && !credentials.started) {
+          waitingRefreshTimer = window.setInterval(async () => {
+            if (cancelled || startSignalReceived) return;
+            try {
+              const latest = await requestJoin(joinUrl, joinBody);
+              if (latest.started) await activateClass(latest.recordingAvailable);
+            } catch (statusError) {
+              if (!cancelled && statusError instanceof Error &&
+                  statusError.message.toLowerCase().includes("ended")) {
+                setEnded(true);
+                setNotice("");
+              }
+            }
+          }, 10_000);
+        }
         if (credentials.role === "learner") {
-          await postAttendance(credentials.sessionId, "join");
-          attendanceActive = true;
-          attendanceSessionId = credentials.sessionId;
+          try {
+            const currentStatus = await requestJoin(joinUrl, joinBody);
+            if (cancelled) return;
+            setInfo(currentStatus);
+            setRecordingAvailable(currentStatus.recordingAvailable ?? null);
+            setMicrophonePermissions((current) => ({
+              ...current,
+              [room?.localParticipant.identity || ""]: Boolean(currentStatus.microphoneAllowed),
+            }));
+            if (currentStatus.started) {
+              await activateClass(currentStatus.recordingAvailable);
+            }
+          } catch (statusError) {
+            if (!cancelled) {
+              setNotice(statusError instanceof Error
+                ? `Connected, but couldn't confirm the class status: ${statusError.message}`
+                : "Connected, but couldn't confirm the class status. It will retry automatically.");
+            }
+          }
         }
         if (credentials.role !== "administrator") {
           try {
-            await room.localParticipant.setCameraEnabled(true);
-          } catch {
-            setNotice("Camera permission is unavailable. You can still listen and use the microphone.");
+            await room.localParticipant.setCameraEnabled(true, {
+              resolution: credentials.role === "teacher"
+                ? VideoPresets.h720.resolution
+                : VideoPresets.h360.resolution,
+            });
+          } catch (cameraError) {
+            if (process.env.NODE_ENV !== "production") {
+              console.warn("[live-class] camera unavailable; joining without video", cameraError);
+            }
+            setNotice("Camera permission is unavailable. You can still join with audio.");
           }
         }
         if (credentials.role === "teacher" || credentials.role === "administrator") {
@@ -582,7 +769,7 @@ export default function LiveKitClassRoom() {
 
     return () => {
       cancelled = true;
-      window.clearTimeout(waitTimer);
+      window.clearInterval(waitingRefreshTimer);
       window.clearTimeout(reconnectTimerRef.current);
       window.clearInterval(attendanceTimer);
       window.removeEventListener("pagehide", onPageHide);
@@ -622,7 +809,12 @@ export default function LiveKitClassRoom() {
     if (!room || !connected || isAdministrator) return;
     setBusy(true);
     try {
-      await room.localParticipant.setCameraEnabled(!room.localParticipant.isCameraEnabled);
+      const enableCamera = !room.localParticipant.isCameraEnabled;
+      await room.localParticipant.setCameraEnabled(enableCamera, {
+        resolution: info?.role === "teacher"
+          ? VideoPresets.h720.resolution
+          : VideoPresets.h360.resolution,
+      });
       setCameraOn(room.localParticipant.isCameraEnabled);
       cameraWantedRef.current = room.localParticipant.isCameraEnabled;
       audioOnlyRef.current = false;
@@ -638,13 +830,103 @@ export default function LiveKitClassRoom() {
   async function toggleMicrophone() {
     const room = roomRef.current;
     if (!room || !connected || isAdministrator) return;
+    const userId = room.localParticipant.identity;
+    const microphoneAllowed = microphonePermissions[userId] ?? info?.microphoneAllowed ?? false;
+    if (info?.role === "learner" && !microphoneAllowed) {
+      setNotice("Your tutor has muted your microphone. Ask them to allow you to speak.");
+      return;
+    }
     setBusy(true);
     try {
       await room.localParticipant.setMicrophoneEnabled(!room.localParticipant.isMicrophoneEnabled);
       setMicrophoneOn(room.localParticipant.isMicrophoneEnabled);
       setNotice("");
-    } catch {
-      setNotice("Microphone permission is unavailable. Check your browser permissions and try again.");
+    } catch (microphoneError) {
+      if (process.env.NODE_ENV !== "production") {
+        console.warn("[live-class] microphone permission failed", microphoneError);
+      }
+      setNotice("Microphone access was denied or blocked. Check your browser permissions and try again.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function toggleScreenShare() {
+    const room = roomRef.current;
+    if (!room || !connected || !isTeacher) return;
+    setBusy(true);
+    try {
+      await room.localParticipant.setScreenShareEnabled(!room.localParticipant.isScreenShareEnabled);
+      setScreenSharing(room.localParticipant.isScreenShareEnabled);
+      setNotice("");
+    } catch (shareError) {
+      if (process.env.NODE_ENV !== "production") {
+        console.warn("[live-class] screen sharing failed", shareError);
+      }
+      setNotice("Screen sharing was denied or is unavailable in this browser.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function toggleAudioOnly() {
+    const room = roomRef.current;
+    if (!room || !connected || isAdministrator) return;
+    const nextAudioOnly = !audioOnly;
+    manualAudioOnlyRef.current = nextAudioOnly;
+    audioOnlyRef.current = nextAudioOnly;
+    setAudioOnly(nextAudioOnly);
+    if (nextAudioOnly) {
+      cameraWantedRef.current = room.localParticipant.isCameraEnabled;
+      try {
+        await room.localParticipant.setCameraEnabled(false);
+        setCameraOn(false);
+        setNotice("Audio-only mode is on. Your microphone and incoming class audio remain available.");
+      } catch (cameraError) {
+        if (process.env.NODE_ENV !== "production") {
+          console.warn("[live-class] audio-only camera shutdown failed", cameraError);
+        }
+        setNotice("Audio-only is selected, but the camera could not be turned off.");
+      }
+    } else {
+      try {
+        await room.localParticipant.setCameraEnabled(true, {
+          resolution: info?.role === "teacher"
+            ? VideoPresets.h720.resolution
+            : VideoPresets.h360.resolution,
+        });
+        setCameraOn(true);
+        cameraWantedRef.current = true;
+        setNotice("");
+      } catch (cameraError) {
+        if (process.env.NODE_ENV !== "production") {
+          console.warn("[live-class] camera could not be restored after audio-only", cameraError);
+        }
+        setNotice("Audio continues normally. Camera access is unavailable; check browser permissions.");
+      }
+    }
+  }
+
+  async function setStudentMicrophone(userId: string, allowMicrophone: boolean) {
+    if (!info?.sessionId || !isTeacher && !isAdministrator) return;
+    setBusy(true);
+    setError("");
+    try {
+      const result = await postJson<{ updated: number }>(
+        `/api/collaboration/sessions/${encodeURIComponent(info.sessionId)}/microphone`,
+        { userId, allowMicrophone },
+      );
+      if (result.updated === 0) {
+        setNotice("No connected students were available for this microphone change.");
+      } else {
+        setNotice(allowMicrophone
+          ? "Microphone permission updated."
+          : "Student microphone muted.");
+      }
+    } catch (permissionError) {
+      setError(permissionError instanceof Error
+        ? permissionError.message
+        : "Student microphone permission could not be changed.");
     } finally {
       setBusy(false);
     }
@@ -655,13 +937,22 @@ export default function LiveKitClassRoom() {
     setBusy(true);
     setError("");
     try {
-      const result = await postJson<{ started: boolean }>(
+      const result = await postJson<{
+        started: boolean;
+        recordingAvailable?: boolean;
+        liveSignalDelivered?: boolean;
+      }>(
         `/api/collaboration/sessions/${encodeURIComponent(info.sessionId)}/start`,
         {},
       );
       setStarted(result.started);
+      setRecordingAvailable(result.recordingAvailable ?? false);
       setConnectionStatus("connected");
-      setNotice("Class started. Recording is being saved privately.");
+      setNotice(!result.recordingAvailable
+        ? "Class started. Recording is unavailable, but the live lesson can continue."
+        : !result.liveSignalDelivered
+          ? "Class started. Some waiting students may take a few seconds to connect."
+          : "Class started. Students in the waiting room are joining now.");
     } catch (startError) {
       setError(startError instanceof Error ? startError.message : "The class could not be started.");
     } finally {
@@ -713,7 +1004,32 @@ export default function LiveKitClassRoom() {
   const teacherEntry = participants.find(({ participant }) =>
     participant.identity === info?.teacherId);
   const studentEntries = participants.filter(({ participant }) =>
-    participant.identity !== info?.teacherId);
+    participant.identity !== info?.teacherId &&
+    participantRole(participant) !== "administrator");
+  const participantPageCount = Math.max(1, Math.ceil(studentEntries.length / PARTICIPANTS_PER_PAGE));
+  const visibleStudentEntries = studentEntries.slice(
+    participantPage * PARTICIPANTS_PER_PAGE,
+    (participantPage + 1) * PARTICIPANTS_PER_PAGE,
+  );
+  const pinnedEntry = pinnedParticipantId
+    ? participants.find(({ participant }) => participant.identity === pinnedParticipantId)
+    : undefined;
+  const stageEntry = pinnedEntry || teacherEntry;
+  const teacherScreenShareTrack = teacherEntry?.participant.getTrackPublication(Track.Source.ScreenShare)?.track;
+  const stageSource = stageEntry?.participant.identity === info?.teacherId && teacherScreenShareTrack
+    ? Track.Source.ScreenShare
+    : Track.Source.Camera;
+  const stageTrack = stageEntry?.participant.getTrackPublication(stageSource)?.track;
+  const stageVideoEnabled = stageSource === Track.Source.ScreenShare
+    ? stageEntry?.participant.isScreenShareEnabled
+    : stageEntry?.participant.isCameraEnabled;
+  const localMicrophoneAllowed = info?.role !== "learner" ||
+    (microphonePermissions[roomRef.current?.localParticipant.identity || ""] ??
+      info?.microphoneAllowed ?? false);
+
+  useEffect(() => {
+    setParticipantPage((page) => Math.min(page, participantPageCount - 1));
+  }, [participantPageCount]);
 
   return (
     <section className="livekit-room" aria-label="Live class">
@@ -734,11 +1050,11 @@ export default function LiveKitClassRoom() {
           >
             <span />
             {connectionStatus === "waiting"
-              ? "Waiting for tutor"
+              ? isTeacher ? "Ready to start" : "Waiting for tutor"
               : connectionStatus[0].toUpperCase() + connectionStatus.slice(1)}
           </span>}
           {audioOnly && <span className="livekit-recording-badge is-starting"><span /> Audio-only</span>}
-          {started && !ended && <span className="livekit-recording-badge is-starting">
+          {started && recordingAvailable && !ended && <span className="livekit-recording-badge is-starting">
             <span /> Recording automatically
           </span>}
           {isTeacher && !ended && !started && (
@@ -781,46 +1097,93 @@ export default function LiveKitClassRoom() {
       </p>}
 
       {!ended && <div className="livekit-controls">
-        <button className="button button-dark" type="button" onClick={() => void toggleMicrophone()} disabled={!connected || busy || isAdministrator}>
+        <button className="button button-dark" type="button" onClick={() => void toggleMicrophone()} disabled={!connected || busy || isAdministrator || !localMicrophoneAllowed}>
           {microphoneOn ? "Mute microphone" : "Unmute microphone"}
         </button>
         <button className="button button-dark" type="button" onClick={() => void toggleCamera()} disabled={!connected || busy || isAdministrator}>
           {cameraOn ? "Turn camera off" : "Turn camera on"}
         </button>
+        <button className="button button-dark" type="button" onClick={() => void toggleAudioOnly()} disabled={!connected || busy || isAdministrator}>
+          {audioOnly ? "Turn video back on" : "Audio only"}
+        </button>
+        {isTeacher && <button className="button button-dark" type="button" onClick={() => void toggleScreenShare()} disabled={!connected || busy}>
+          {screenSharing ? "Stop sharing" : "Share screen"}
+        </button>}
+        {info?.role === "learner" && !localMicrophoneAllowed &&
+          <span className="livekit-mic-permission" role="status">Muted by your tutor</span>}
       </div>}
 
       {!ended && <div className="livekit-layout livekit-managed-layout">
-        <section className="livekit-main-view" aria-label="Tutor main view">
-          {teacherEntry?.participant.isCameraEnabled
+        <section className={`livekit-main-view${activeSpeakerId === stageEntry?.participant.identity ? " is-active-speaker" : ""}`} aria-label="Main class stage">
+          {stageEntry && stageVideoEnabled && stageTrack
             ? <VideoTrackView
-              participant={teacherEntry.participant}
-              className="livekit-main-video livekit-teacher-video"
-              muted={teacherEntry.local}
+              participant={stageEntry.participant}
+              className={`livekit-main-video${stageSource === Track.Source.ScreenShare ? " is-screen-share" : " livekit-teacher-video"}`}
+              muted={stageEntry.local}
+              source={stageSource}
             />
             : <div className="livekit-main-placeholder">
               <span className="livekit-teacher-avatar">
-                {initials(info?.teacherName || "Tutor")}
+                {initials(stageEntry?.participant.name || info?.teacherName || "Tutor")}
               </span>
-              <strong>{info?.teacherName || "Tutor"}</strong>
-              <span>{started ? "Tutor camera is off" : "Waiting for the tutor to start the class"}</span>
+              <strong>{stageEntry?.participant.name || info?.teacherName || "Tutor"}</strong>
+              <span>{stageEntry
+                ? stageEntry.participant.identity === info?.teacherId && screenSharing
+                  ? "Tutor is sharing their screen"
+                  : stageEntry.participant.isCameraEnabled ? "Connecting video…" : "Camera is off"
+                : started ? "Waiting for the tutor to join the room" : "Waiting for the tutor to start the class"}</span>
             </div>}
-          {participants.map((entry) => (
+          {stageEntry && <p className="livekit-stage-caption">
+            {stageEntry.participant.identity === info?.teacherId && stageSource === Track.Source.ScreenShare
+              ? "Tutor screen share"
+              : stageEntry.participant.name || "Class participant"}
+          </p>}
+          {participants.flatMap((entry) => [
             <ParticipantAudio
-              key={entry.participant.identity}
+              key={`${entry.participant.identity}-microphone`}
               participant={entry.participant}
               local={entry.local}
-            />
-          ))}
+            />,
+            <ParticipantAudio
+              key={`${entry.participant.identity}-share-audio`}
+              participant={entry.participant}
+              local={entry.local}
+              source={Track.Source.ScreenShareAudio}
+            />,
+          ])}
         </section>
 
         <aside className="livekit-sidebar livekit-managed-sidebar">
           <section className="livekit-roster" aria-label="Class participants">
             <h2>Students in class <span>{studentEntries.length}</span></h2>
+            {(isTeacher || isAdministrator) && started && <div className="livekit-host-controls">
+              <button
+                className="button button-quiet"
+                type="button"
+                onClick={() => void setStudentMicrophone("all", true)}
+                disabled={busy || studentEntries.length === 0}
+              >Unmute all</button>
+              <button
+                className="button button-quiet"
+                type="button"
+                onClick={() => void setStudentMicrophone("all", false)}
+                disabled={busy || studentEntries.length === 0}
+              >Mute all</button>
+            </div>}
             {studentEntries.length === 0
               ? <p className="livekit-attendance-empty">Students will appear here when they join.</p>
               : <div className="livekit-student-row livekit-side-strip">
-                {studentEntries.map(({ participant, local }) => (
-                  <article className="livekit-student-tile" key={participant.identity}>
+                {visibleStudentEntries.map(({ participant, local }) => {
+                  const attendee = attendees.find(({ id }) => id === participant.identity);
+                  const microphoneAllowed = microphonePermissions[participant.identity] ??
+                    attendee?.microphoneAllowed ?? false;
+                  const isPinned = participant.identity === pinnedParticipantId;
+                  const isActiveSpeaker = participant.identity === activeSpeakerId;
+                  return (
+                  <article
+                    className={`livekit-student-tile${isActiveSpeaker ? " is-active-speaker" : ""}${isPinned ? " is-pinned" : ""}`}
+                    key={participant.identity}
+                  >
                     <div className="livekit-student-video-frame">
                       {participant.isCameraEnabled
                         ? <VideoTrackView
@@ -833,10 +1196,44 @@ export default function LiveKitClassRoom() {
                         </span>}
                     </div>
                     <strong>{participant.name || participant.identity}</strong>
-                    <small>{participant.isMicrophoneEnabled ? "Microphone on" : "Muted"}</small>
+                    <small className="livekit-mic-state">
+                      {participant.isMicrophoneEnabled && microphoneAllowed ? "Mic on" : "Muted"}
+                      <span className={`livekit-network-state is-${participant.connectionQuality}`}>
+                        {connectionQualityLabel(participant.connectionQuality)}
+                      </span>
+                    </small>
+                    <div className="livekit-student-tile-actions">
+                      <button
+                        className="button button-quiet"
+                        type="button"
+                        onClick={() => setPinnedParticipantId(isPinned ? "" : participant.identity)}
+                      >{isPinned ? "Unpin" : "Pin"}</button>
+                      {(isTeacher || isAdministrator) && started && <button
+                        className="button button-quiet"
+                        type="button"
+                        disabled={busy}
+                        onClick={() => void setStudentMicrophone(participant.identity, !microphoneAllowed)}
+                      >{microphoneAllowed ? "Mute" : "Allow mic"}</button>}
+                    </div>
                   </article>
-                ))}
+                  );
+                })}
               </div>}
+            {studentEntries.length > PARTICIPANTS_PER_PAGE && <div className="livekit-participant-pagination">
+              <button
+                className="button button-quiet"
+                type="button"
+                onClick={() => setParticipantPage((page) => Math.max(0, page - 1))}
+                disabled={participantPage === 0}
+              >Previous</button>
+              <span>Page {participantPage + 1} of {participantPageCount}</span>
+              <button
+                className="button button-quiet"
+                type="button"
+                onClick={() => setParticipantPage((page) => Math.min(participantPageCount - 1, page + 1))}
+                disabled={participantPage + 1 >= participantPageCount}
+              >Next</button>
+            </div>}
 
             {(isTeacher || isAdministrator) && <>
               <h3 className="livekit-attendance-heading">

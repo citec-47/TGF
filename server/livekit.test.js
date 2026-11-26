@@ -24,7 +24,7 @@ test("normalizes the LiveKit API host while retaining the browser WebSocket URL"
   });
 });
 
-test("issues a scoped token that cannot publish as an administrator", async () => {
+test("issues an administrator token with no publish sources", async () => {
   const jwt = await createLiveKitParticipantToken({
     identity: "admin-id",
     name: "Administrator",
@@ -34,8 +34,47 @@ test("issues a scoped token that cannot publish as an administrator", async () =
   const claims = JSON.parse(Buffer.from(jwt.split(".")[1], "base64url").toString("utf8"));
   assert.equal(claims.sub, "admin-id");
   assert.equal(claims.video.room, "tgf-live-test");
-  assert.equal(claims.video.canPublish, false);
+  assert.deepEqual(claims.video.canPublishSources, []);
   assert.equal(claims.video.canSubscribe, true);
+});
+
+test("keeps a learner microphone permission off the token until host approval", async () => {
+  const credentials = {
+    identity: "student-id",
+    name: "Student",
+    roomName: "tgf-live-test",
+    role: "learner",
+  };
+  const createClaims = async (microphoneAllowed) => {
+    const jwt = await createLiveKitParticipantToken({
+      ...credentials,
+      microphoneAllowed,
+    }, config);
+    return JSON.parse(Buffer.from(jwt.split(".")[1], "base64url").toString("utf8"));
+  };
+
+  const mutedClaims = await createClaims(false);
+  assert.deepEqual(mutedClaims.video.canPublishSources, ["camera"]);
+
+  const allowedClaims = await createClaims(true);
+  assert.deepEqual(allowedClaims.video.canPublishSources, ["camera", "microphone"]);
+});
+
+test("allows tutors to publish audio, video, and screen shares", async () => {
+  const jwt = await createLiveKitParticipantToken({
+    identity: "teacher-id",
+    name: "Tutor",
+    roomName: "tgf-live-test",
+    role: "teacher",
+  }, config);
+  const claims = JSON.parse(Buffer.from(jwt.split(".")[1], "base64url").toString("utf8"));
+
+  assert.deepEqual(claims.video.canPublishSources, [
+    "camera",
+    "microphone",
+    "screen_share",
+    "screen_share_audio",
+  ]);
 });
 
 test("creates session-scoped MP4 object keys and rejects keys outside the private prefix", () => {

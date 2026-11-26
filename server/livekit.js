@@ -9,9 +9,11 @@ import {
   StartEgressRequest,
   StorageConfig,
   TemplateSource,
+  TrackSource,
   WebhookReceiver,
 } from "livekit-server-sdk";
 import { S3Client } from "@aws-sdk/client-s3";
+import { LIVE_CLASS_CONTROL_TOPIC } from "../lib/live-class-events.js";
 
 let privateStorageCache;
 let privateStorageCacheKey = "";
@@ -48,7 +50,7 @@ export function getLiveKitConfig(env = process.env) {
 }
 
 export function createLiveKitParticipantToken(
-  { identity, name, roomName, role },
+  { identity, name, roomName, role, microphoneAllowed = false },
   env = process.env,
 ) {
   const config = getLiveKitConfig(env);
@@ -56,13 +58,27 @@ export function createLiveKitParticipantToken(
     identity,
     name,
     ttl: "6h",
+    metadata: JSON.stringify({ role }),
   });
+  const canPublishSources = role === "teacher"
+    ? [
+      TrackSource.CAMERA,
+      TrackSource.MICROPHONE,
+      TrackSource.SCREEN_SHARE,
+      TrackSource.SCREEN_SHARE_AUDIO,
+    ]
+    : role === "learner"
+      ? [
+        TrackSource.CAMERA,
+        ...(microphoneAllowed ? [TrackSource.MICROPHONE] : []),
+      ]
+      : [];
   token.addGrant({
     roomJoin: true,
     room: roomName,
-    canPublish: role !== "administrator",
     canSubscribe: true,
     canPublishData: role !== "administrator",
+    canPublishSources,
   });
   return token.toJwt();
 }
@@ -190,6 +206,48 @@ export async function stopLiveKitRecording(egressId, env = process.env) {
 
 export async function deleteLiveKitRoom(roomName, env = process.env) {
   return createLiveKitApi(env).room.deleteRoom(roomName);
+}
+
+export async function listLiveKitRoomParticipants(roomName, env = process.env) {
+  return createLiveKitApi(env).room.listParticipants(roomName);
+}
+
+export async function setLiveKitParticipantMicrophonePermission(
+  roomName,
+  identity,
+  microphoneAllowed,
+  env = process.env,
+) {
+  const room = createLiveKitApi(env).room;
+  const participant = await room.getParticipant(roomName, identity);
+  const microphoneTrack = participant.tracks?.find(
+    (track) => track.source === TrackSource.MICROPHONE,
+  );
+  if (!microphoneAllowed && microphoneTrack) {
+    await room.mutePublishedTrack(roomName, identity, microphoneTrack.sid, true);
+  }
+  await room.updateParticipant(roomName, identity, {
+    permission: {
+      canSubscribe: true,
+      canPublish: true,
+      canPublishData: true,
+      canPublishSources: microphoneAllowed
+        ? [TrackSource.CAMERA, TrackSource.MICROPHONE]
+        : [TrackSource.CAMERA],
+    },
+  });
+  if (microphoneAllowed && microphoneTrack) {
+    await room.mutePublishedTrack(roomName, identity, microphoneTrack.sid, false);
+  }
+}
+
+export async function publishLiveClassControlEvent(roomName, event, env = process.env) {
+  return createLiveKitApi(env).room.sendData(
+    roomName,
+    new TextEncoder().encode(JSON.stringify(event)),
+    DataPacket_Kind.RELIABLE,
+    { topic: LIVE_CLASS_CONTROL_TOPIC },
+  );
 }
 
 export async function publishLiveClassChatMessage(roomName, messageId, env = process.env) {

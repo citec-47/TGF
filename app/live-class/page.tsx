@@ -1,6 +1,6 @@
 import { Suspense } from "react";
 
-import LiveClassRoom from "./livekit-room";
+import ClassroomClient from "./classroom-client";
 
 export const metadata = {
   title: "Live class | TGF Vocational Pathways",
@@ -11,7 +11,7 @@ export default function LiveClassPage() {
   return (
     <main className="livekit-page">
       <Suspense fallback={<p className="admin-intro">Preparing your classroom…</p>}>
-        <LiveClassRoom />
+        <ClassroomClient />
       </Suspense>
     </main>
   );
