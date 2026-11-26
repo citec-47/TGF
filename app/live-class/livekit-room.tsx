@@ -1073,10 +1073,13 @@ export default function LiveKitClassRoom() {
         </div>
       </header>
 
-      {connecting && <p className="admin-intro" role="status">Connecting to class…</p>}
+      {connecting && <p className="livekit-page-status" role="status">Connecting to class…</p>}
       {error && (
-        <div>
-          <p className="admin-message is-error" role="alert">{error}</p>
+        <section className="livekit-error-panel" role="alert">
+          <div>
+            <strong>Couldn't connect to the live class</strong>
+            <p>{error}</p>
+          </div>
           <button
             className="button button-dark"
             type="button"
@@ -1089,29 +1092,12 @@ export default function LiveKitClassRoom() {
               setRetryKey((key) => key + 1);
             }}
           >Retry connection</button>
-        </div>
+        </section>
       )}
-      {notice && <p className="livekit-recording-notice" role="status">{notice}</p>}
+      {notice && <p className="livekit-recording-notice livekit-page-status" role="status">{notice}</p>}
       {ended && <p className="livekit-waiting-room" role="status">
         <span><strong>Class has ended.</strong> Return to your dashboard when you are ready.</span>
       </p>}
-
-      {!ended && <div className="livekit-controls">
-        <button className="button button-dark" type="button" onClick={() => void toggleMicrophone()} disabled={!connected || busy || isAdministrator || !localMicrophoneAllowed}>
-          {microphoneOn ? "Mute microphone" : "Unmute microphone"}
-        </button>
-        <button className="button button-dark" type="button" onClick={() => void toggleCamera()} disabled={!connected || busy || isAdministrator}>
-          {cameraOn ? "Turn camera off" : "Turn camera on"}
-        </button>
-        <button className="button button-dark" type="button" onClick={() => void toggleAudioOnly()} disabled={!connected || busy || isAdministrator}>
-          {audioOnly ? "Turn video back on" : "Audio only"}
-        </button>
-        {isTeacher && <button className="button button-dark" type="button" onClick={() => void toggleScreenShare()} disabled={!connected || busy}>
-          {screenSharing ? "Stop sharing" : "Share screen"}
-        </button>}
-        {info?.role === "learner" && !localMicrophoneAllowed &&
-          <span className="livekit-mic-permission" role="status">Muted by your tutor</span>}
-      </div>}
 
       {!ended && <div className="livekit-layout livekit-managed-layout">
         <section className={`livekit-main-view${activeSpeakerId === stageEntry?.participant.identity ? " is-active-speaker" : ""}`} aria-label="Main class stage">
@@ -1151,6 +1137,22 @@ export default function LiveKitClassRoom() {
               source={Track.Source.ScreenShareAudio}
             />,
           ])}
+          <div className="livekit-controls" role="group" aria-label="Call controls">
+            <button className="button button-dark" type="button" onClick={() => void toggleMicrophone()} disabled={!connected || busy || isAdministrator || !localMicrophoneAllowed}>
+              {microphoneOn ? "Mute microphone" : "Unmute microphone"}
+            </button>
+            <button className="button button-dark" type="button" onClick={() => void toggleCamera()} disabled={!connected || busy || isAdministrator}>
+              {cameraOn ? "Turn camera off" : "Turn camera on"}
+            </button>
+            <button className="button button-dark" type="button" onClick={() => void toggleAudioOnly()} disabled={!connected || busy || isAdministrator}>
+              {audioOnly ? "Turn video back on" : "Audio only"}
+            </button>
+            {isTeacher && <button className="button button-dark" type="button" onClick={() => void toggleScreenShare()} disabled={!connected || busy}>
+              {screenSharing ? "Stop sharing" : "Share screen"}
+            </button>}
+            {info?.role === "learner" && !localMicrophoneAllowed &&
+              <span className="livekit-mic-permission" role="status">Muted by your tutor</span>}
+          </div>
         </section>
 
         <aside className="livekit-sidebar livekit-managed-sidebar">

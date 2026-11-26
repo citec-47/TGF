@@ -7606,3 +7606,234 @@
     min-height: 44px;
   }
 }
+
+.livekit-page {
+  position: relative;
+}
+
+.livekit-page > .tgf-language-picker {
+  top: 38px;
+  right: max(24px, calc((100vw - 1500px) / 2 + 24px));
+}
+
+.livekit-room {
+  position: relative;
+  display: grid;
+  gap: 14px;
+}
+
+.livekit-header {
+  align-items: flex-end;
+  padding: 22px 24px;
+}
+
+.livekit-header > div:first-child {
+  min-width: 0;
+}
+
+.livekit-header-actions {
+  flex: 0 0 auto;
+}
+
+.livekit-page-status {
+  margin: 0;
+}
+
+.livekit-error-panel {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  border: 1px solid #e8c7c1;
+  border-radius: 14px;
+  padding: 14px 18px;
+  background: #fff3f1;
+  color: #842d25;
+}
+
+.livekit-error-panel p {
+  margin: 4px 0 0;
+  overflow-wrap: anywhere;
+}
+
+.livekit-error-panel .button {
+  flex: 0 0 auto;
+}
+
+.livekit-managed-layout {
+  grid-template-columns: minmax(0, 1fr) minmax(290px, 340px);
+  gap: 16px;
+  margin-top: 0;
+}
+
+.livekit-managed-layout .livekit-main-view,
+.livekit-managed-layout .livekit-main-video {
+  min-height: clamp(380px, 64vh, 700px);
+}
+
+.livekit-managed-layout .livekit-main-view {
+  padding-bottom: 82px;
+  border-radius: 20px;
+}
+
+.livekit-managed-layout .livekit-main-video {
+  border-radius: 20px;
+}
+
+.livekit-managed-layout .livekit-controls {
+  position: absolute;
+  z-index: 4;
+  right: 12px;
+  bottom: 12px;
+  left: 12px;
+  justify-content: center;
+  width: fit-content;
+  max-width: calc(100% - 24px);
+  margin: 0 auto;
+  border: 1px solid rgb(255 255 255 / 14%);
+  border-radius: 16px;
+  padding: 9px;
+  background: rgb(20 21 19 / 88%);
+  box-shadow: 0 8px 28px rgb(0 0 0 / 28%);
+  backdrop-filter: blur(12px);
+}
+
+.livekit-managed-layout .livekit-controls .button {
+  min-height: 42px;
+  border-radius: 10px;
+  white-space: nowrap;
+}
+
+.livekit-managed-layout .livekit-mic-permission {
+  border-radius: 8px;
+  padding: 8px 10px;
+  background: #fff3f1;
+}
+
+.livekit-managed-layout .livekit-sidebar {
+  gap: 14px;
+}
+
+.livekit-managed-sidebar .livekit-chat {
+  min-height: 320px;
+  max-height: min(52vh, 480px);
+}
+
+.livekit-managed-sidebar .livekit-chat-messages {
+  min-height: 100px;
+}
+
+.livekit-page.is-dark .livekit-error-panel {
+  border-color: #71453f;
+  background: #382522;
+  color: #ffb3aa;
+}
+
+@media (max-width: 900px) {
+  .livekit-managed-layout {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas:
+      "video"
+      "sidebar";
+  }
+
+  .livekit-managed-layout .livekit-side-strip {
+    max-height: none;
+    flex-direction: row;
+  }
+
+  .livekit-managed-layout .livekit-side-strip .livekit-student-tile {
+    flex: 0 0 180px;
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .livekit-managed-layout .livekit-side-strip .livekit-student-video-frame {
+    grid-row: auto;
+  }
+}
+
+@media (max-width: 760px) {
+  .livekit-page > .tgf-language-picker {
+    top: 14px;
+    right: 14px;
+  }
+
+  .livekit-room {
+    gap: 10px;
+    padding-top: 36px;
+  }
+
+  .livekit-header {
+    align-items: stretch;
+    padding: 16px;
+  }
+
+  .livekit-header-actions {
+    align-items: stretch;
+  }
+
+  .livekit-header-actions > * {
+    flex: 1 1 auto;
+    justify-content: center;
+  }
+
+  .livekit-error-panel {
+    align-items: stretch;
+    flex-direction: column;
+    gap: 10px;
+    padding: 14px;
+  }
+
+  .livekit-error-panel .button {
+    width: 100%;
+  }
+
+  .livekit-managed-layout {
+    gap: 10px;
+  }
+
+  .livekit-managed-layout .livekit-main-view,
+  .livekit-managed-layout .livekit-main-video {
+    min-height: min(58vh, 520px);
+  }
+
+  .livekit-managed-layout .livekit-main-view {
+    padding-bottom: 104px;
+  }
+
+  .livekit-managed-layout .livekit-controls {
+    right: 8px;
+    bottom: 8px;
+    left: 8px;
+    justify-content: center;
+    gap: 6px;
+    width: auto;
+    max-width: none;
+    border-radius: 14px;
+    padding: 7px;
+  }
+
+  .livekit-managed-layout .livekit-controls .button {
+    min-height: 42px;
+    flex: 1 1 42%;
+    padding: 8px;
+    font-size: 0.78rem;
+  }
+
+  .livekit-managed-layout .livekit-mic-permission {
+    flex: 1 1 100%;
+    text-align: center;
+  }
+
+  .livekit-managed-sidebar .livekit-chat {
+    min-height: 340px;
+    max-height: 60vh;
+  }
+}
+
+@media (max-width: 900px) and (orientation: landscape) {
+  .livekit-managed-layout .livekit-main-view,
+  .livekit-managed-layout .livekit-main-video {
+    min-height: min(72vh, 420px);
+  }
+}
