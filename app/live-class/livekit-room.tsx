@@ -3,6 +3,7 @@
 import { useSearchParams } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import {
+  ConnectionQuality,
   Room,
   RoomEvent,
   Track,
@@ -118,6 +119,8 @@ export default function LiveKitClassRoom() {
   const retryUrl = useRef("");
   const retryBody = useRef<object>({});
   const roomRef = useRef<Room | null>(null);
+  const cameraWantedRef = useRef(true);
+  const reconnectTimerRef = useRef<number>(0);
   const [retryKey, setRetryKey] = useState(0);
   const [info, setInfo] = useState<JoinResponse | null>(null);
   const [participants, setParticipants] = useState<ParticipantEntry[]>([]);
@@ -129,6 +132,7 @@ export default function LiveKitClassRoom() {
   const [busy, setBusy] = useState(false);
   const [cameraOn, setCameraOn] = useState(false);
   const [microphoneOn, setMicrophoneOn] = useState(false);
+  const [audioOnly, setAudioOnly] = useState(false);
   const [notice, setNotice] = useState("");
   const [error, setError] = useState("");
 
@@ -208,13 +212,23 @@ export default function LiveKitClassRoom() {
         roomRef.current = room;
         const refreshParticipants = () => {
           if (!room || cancelled) return;
-          setParticipants([
+          const nextParticipants = [
             { participant: room.localParticipant, local: true },
             ...Array.from(room.remoteParticipants.values())
               .map((participant) => ({ participant, local: false })),
-          ]);
+          ];
+          setParticipants(nextParticipants);
           setCameraOn(room.localParticipant.isCameraEnabled);
           setMicrophoneOn(room.localParticipant.isMicrophoneEnabled);
+          if (credentials.role === "learner" && credentials.started) {
+            const teacherPresent = nextParticipants.some(({ participant }) =>
+              participant.identity === credentials.teacherId);
+            if (!teacherPresent) {
+              setNotice("Your tutor is temporarily offline. The class remains active and will reconnect automatically.");
+            } else if (!notice && !audioOnly) {
+              setNotice("");
+            }
+          }
         };
         for (const event of [
           RoomEvent.ParticipantConnected,
@@ -227,9 +241,25 @@ export default function LiveKitClassRoom() {
           RoomEvent.LocalTrackUnpublished,
           RoomEvent.TrackMuted,
           RoomEvent.TrackUnmuted,
+          RoomEvent.ConnectionQualityChanged,
         ]) {
           room.on(event, refreshParticipants);
         }
+        room.on(RoomEvent.ConnectionQualityChanged, (quality: ConnectionQuality, participant: Participant) => {
+          if (cancelled || participant !== room?.localParticipant) return;
+          if (quality === ConnectionQuality.Poor) {
+            setAudioOnly(true);
+            cameraWantedRef.current = room.localParticipant.isCameraEnabled;
+            setNotice("Slow network detected. Switching to audio-only; video will return automatically when the connection improves.");
+            void room.localParticipant.setCameraEnabled(false).catch(() => undefined);
+          } else if (quality === ConnectionQuality.Good || quality === ConnectionQuality.Excellent) {
+            setAudioOnly(false);
+            if (cameraWantedRef.current && credentials.role !== "administrator") {
+              void room.localParticipant.setCameraEnabled(true).catch(() => undefined);
+            }
+            setNotice((current) => current.includes("Slow network detected") ? "" : current);
+          }
+        });
         room.on(RoomEvent.Reconnecting, () => {
           if (!cancelled) {
             setConnected(false);
@@ -251,7 +281,11 @@ export default function LiveKitClassRoom() {
               setStarted(false);
               setNotice("The class is waiting for your tutor to restart it.");
             } else if (!cancelled) {
-              setError("Your connection dropped. Select Retry connection to rejoin.");
+              setNotice("Connection interrupted. Reconnecting automatically...");
+              window.clearTimeout(reconnectTimerRef.current);
+              reconnectTimerRef.current = window.setTimeout(() => {
+                if (!cancelled) setRetryKey((key) => key + 1);
+              }, 5000);
             }
           }).catch((disconnectError: unknown) => {
             if (cancelled) return;
@@ -260,7 +294,11 @@ export default function LiveKitClassRoom() {
               setEnded(true);
               setNotice("");
             } else {
-              setError("Your connection dropped. Select Retry connection to rejoin.");
+              setNotice("Connection interrupted. Reconnecting automatically...");
+              window.clearTimeout(reconnectTimerRef.current);
+              reconnectTimerRef.current = window.setTimeout(() => {
+                if (!cancelled) setRetryKey((key) => key + 1);
+              }, 5000);
             }
           });
         });
@@ -330,6 +368,7 @@ export default function LiveKitClassRoom() {
     return () => {
       cancelled = true;
       window.clearTimeout(waitTimer);
+      window.clearTimeout(reconnectTimerRef.current);
       window.clearInterval(attendanceTimer);
       window.removeEventListener("pagehide", onPageHide);
       if (attendanceActive) {
@@ -350,6 +389,8 @@ export default function LiveKitClassRoom() {
     try {
       await room.localParticipant.setCameraEnabled(!room.localParticipant.isCameraEnabled);
       setCameraOn(room.localParticipant.isCameraEnabled);
+      cameraWantedRef.current = room.localParticipant.isCameraEnabled;
+      setAudioOnly(false);
       setNotice("");
     } catch {
       setNotice("Camera permission is unavailable. Check your browser permissions and try again.");
@@ -450,6 +491,7 @@ export default function LiveKitClassRoom() {
         </div>
         <div className="livekit-header-actions">
           {connected && <span className="livekit-recording-badge"><span /> Connected</span>}
+          {audioOnly && <span className="livekit-recording-badge is-starting"><span /> Audio-only</span>}
           {started && !ended && <span className="livekit-recording-badge is-starting">
             <span /> Recording automatically
           </span>}
