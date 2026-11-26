@@ -25,6 +25,7 @@ import {
   getLiveKitConfig,
   getPrivateRecordingStorage,
   isLiveRecordingObjectKey,
+  publishLiveClassChatMessage,
   startLiveKitRecording,
   stopLiveKitRecording,
   verifyLiveKitWebhook,
@@ -35,6 +36,11 @@ import {
   markLiveSessionParticipantLeft,
 } from "./live-session-attendance.js";
 import { validateMessageAttachment } from "./message-validation.js";
+import {
+  canShowLiveClassChatEmail,
+  isLiveClassChatMessageId,
+  normalizeLiveClassChatBody,
+} from "./live-session-chat.js";
 
 interface CollaborationAccount {
   id: string;
@@ -87,6 +93,158 @@ const ADMIN_EVENT_CHANNEL = "tgf_chat_admin";
 const CAMEROON_TIMEZONE = "Africa/Douala";
 function isUuid(value: string): boolean {
   return /^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i.test(value);
+}
+
+interface LiveClassChatSession extends QueryResultRow {
+  id: string;
+  room_name: string;
+  programme_id: string;
+  teacher_id: string;
+  started_at: Date | null;
+  ended_at: Date | null;
+}
+
+interface LiveClassChatMessageRow extends QueryResultRow {
+  id: string;
+  sender_user_id: string;
+  body: string;
+  created_at: Date;
+  full_name: string;
+  email: string;
+  profile_photo_url: string;
+  role: string;
+}
+
+async function getLiveClassChatSession(
+  sessionId: string,
+  account: CollaborationAccount,
+  services: CollaborationServices,
+): Promise<LiveClassChatSession> {
+  const result = await services.pool.query<LiveClassChatSession>(
+    `SELECT id, room_name, programme_id, teacher_id, started_at, ended_at
+     FROM tgf_live_sessions WHERE id = $1`,
+    [sessionId],
+  );
+  const session = result.rows[0];
+  if (!session) throw Object.assign(new Error("This live class was not found."), { status: 404 });
+  if (account.role === "administrator" ||
+      (account.role === "teacher" && account.id === session.teacher_id)) {
+    return session;
+  }
+  if (account.role === "learner") {
+    const enrollment = await services.pool.query(
+      `SELECT 1
+       FROM tgf_enrollments enrollment
+       JOIN tgf_users learner ON learner.id = enrollment.user_id
+       WHERE enrollment.user_id = $1 AND enrollment.programme_id = $2
+         AND enrollment.approval_status = 'approved'
+         AND learner.role = 'learner' AND learner.account_status = 'active'
+         AND learner.is_frozen = FALSE`,
+      [account.id, session.programme_id],
+    );
+    if (enrollment.rowCount === 1) return session;
+  }
+  throw Object.assign(new Error("You are not enrolled in this course."), { status: 403 });
+}
+
+function liveClassChatMessageForViewer(
+  row: LiveClassChatMessageRow,
+  account: CollaborationAccount,
+): Record<string, unknown> {
+  const showAllEmails = process.env.LIVE_CLASS_CHAT_SHOW_STUDENT_EMAILS?.trim().toLowerCase() === "true";
+  return {
+    id: row.id,
+    senderId: row.sender_user_id,
+    name: row.full_name,
+    email: canShowLiveClassChatEmail({
+      viewerId: account.id,
+      viewerRole: account.role,
+      senderId: row.sender_user_id,
+      showAllEmails,
+    }) ? row.email : "",
+    profilePhotoUrl: row.profile_photo_url,
+    role: row.role === "teacher" || row.role === "administrator" ? row.role : "learner",
+    body: row.body,
+    createdAt: row.created_at.toISOString(),
+  };
+}
+
+async function readLiveClassChatMessages(
+  sessionId: string,
+  account: CollaborationAccount,
+  services: CollaborationServices,
+  messageId?: string,
+): Promise<Record<string, unknown>[]> {
+  const result = await services.pool.query<LiveClassChatMessageRow>(
+    `SELECT message.id, message.sender_user_id, message.body, message.created_at,
+            sender.full_name, sender.email, sender.profile_photo_url, sender.role
+     FROM tgf_live_session_chat_messages message
+     JOIN tgf_users sender ON sender.id = message.sender_user_id
+     WHERE message.session_id = $1 AND ($2::uuid IS NULL OR message.id = $2)
+     ORDER BY message.created_at, message.id`,
+    [sessionId, messageId || null],
+  );
+  return result.rows.map((row) => liveClassChatMessageForViewer(row, account));
+}
+
+async function getLiveClassChat(
+  sessionId: string,
+  messageId: string | undefined,
+  account: CollaborationAccount,
+  services: CollaborationServices,
+): Promise<Response> {
+  if (!isUuid(sessionId) || (messageId && !isLiveClassChatMessageId(messageId))) {
+    return services.jsonResponse(404, { error: "This chat message was not found." });
+  }
+  await getLiveClassChatSession(sessionId, account, services);
+  const messages = await readLiveClassChatMessages(sessionId, account, services, messageId);
+  if (messageId) {
+    if (!messages[0]) return services.jsonResponse(404, { error: "This chat message was not found." });
+    return services.jsonResponse(200, { message: messages[0] });
+  }
+  return services.jsonResponse(200, { messages });
+}
+
+async function sendLiveClassChatMessage(
+  request: Request,
+  sessionId: string,
+  account: CollaborationAccount,
+  services: CollaborationServices,
+): Promise<Response> {
+  if (!isUuid(sessionId)) return services.jsonResponse(404, { error: "This live class was not found." });
+  const { clientMessageId: rawMessageId, body: rawBody } = await readJson(request);
+  if (typeof rawMessageId !== "string" || !isLiveClassChatMessageId(rawMessageId)) {
+    return services.jsonResponse(400, { error: "A valid message ID is required." });
+  }
+  const body = normalizeLiveClassChatBody(rawBody);
+  if (!body) return services.jsonResponse(400, { error: "Enter a message of 1–2000 characters." });
+
+  const session = await getLiveClassChatSession(sessionId, account, services);
+  if (!session.started_at || session.ended_at) {
+    return services.jsonResponse(409, { error: "Chat is available while the class is live." });
+  }
+
+  const inserted = await services.pool.query<{ id: string }>(
+    `INSERT INTO tgf_live_session_chat_messages
+       (session_id, sender_user_id, client_message_id, body)
+     VALUES ($1, $2, $3, $4)
+     ON CONFLICT (session_id, sender_user_id, client_message_id) DO NOTHING
+     RETURNING id`,
+    [sessionId, account.id, rawMessageId, body],
+  );
+  const messageId = inserted.rows[0]?.id || (await services.pool.query<{ id: string }>(
+    `SELECT id FROM tgf_live_session_chat_messages
+     WHERE session_id = $1 AND sender_user_id = $2 AND client_message_id = $3`,
+    [sessionId, account.id, rawMessageId],
+  )).rows[0]?.id;
+  if (!messageId) {
+    return services.jsonResponse(409, { error: "The class chat is no longer available." });
+  }
+
+  await publishLiveClassChatMessage(session.room_name, messageId);
+  const [message] = await readLiveClassChatMessages(sessionId, account, services, messageId);
+  if (!message) throw new Error("The saved live-class message could not be loaded.");
+  return services.jsonResponse(200, { message });
 }
 
 function isActiveAccount(account: CollaborationAccount | null): account is CollaborationAccount {
@@ -3696,6 +3854,19 @@ export async function handleCollaborationRequest(
         segments.slice(0, 3).join("/") === "api/collaboration/notifications" &&
         segments[4] === "read" && request.method === "POST") {
       return await deleteNotification(segments[3], account, services);
+    }
+    if (segments.length === 5 &&
+        segments.slice(0, 3).join("/") === "api/collaboration/sessions" &&
+        segments[4] === "chat" &&
+        (request.method === "GET" || request.method === "POST")) {
+      return request.method === "GET"
+        ? await getLiveClassChat(segments[3], undefined, account, services)
+        : await sendLiveClassChatMessage(request, segments[3], account, services);
+    }
+    if (segments.length === 6 &&
+        segments.slice(0, 3).join("/") === "api/collaboration/sessions" &&
+        segments[4] === "chat" && request.method === "GET") {
+      return await getLiveClassChat(segments[3], segments[5], account, services);
     }
     if (segments.length === 5 &&
         segments.slice(0, 3).join("/") === "api/collaboration/sessions" &&

@@ -109,7 +109,16 @@ The app's custom React layout keeps the tutor on the large stage and the class
 participants in a side strip. PostgreSQL-backed server checks issue room-scoped
 tokens only to the assigned tutor, active administrators, and students with an
 approved course enrollment. Students can wait for the tutor to start; a
-separate invitation is not required.
+separate invitation is not required. The room reports connection, reconnect,
+waiting and failure states. Class chat is persisted per session, authorized
+using the same course enrollment, and delivered through reliable LiveKit room
+data; messages load from the server after joining or refreshing.
+
+Chat sender names, role and profile photo are read from the account record.
+Student email addresses are visible only to the sender, tutor and
+administrators by default. Set `LIVE_CLASS_CHAT_SHOW_STUDENT_EMAILS=true` in
+the server environment only if you explicitly want every participant to see
+all sender emails.
 
 The tutor starts and ends the session in the classroom. LiveKit Egress records
 the room to a private S3-compatible bucket (Cloudflare R2 is the recommended
@@ -155,7 +164,7 @@ recording-ready emails.
    configuration is logged by the server.
 6. Run `npm run db:migrate` against the production `DATABASE_URL` to apply
    migration `040_livekit_recordings.sql` and any other pending migrations,
-   then restart the Node server. Keep `DATABASE_URL`, `SESSION_SECRET`, and all
+   including `041_live_session_chat.sql`, then restart the Node server. Keep `DATABASE_URL`, `SESSION_SECRET`, and all
    provider credentials server-side. Do not add them to `NEXT_PUBLIC_*`, source
    files, or Git.
 

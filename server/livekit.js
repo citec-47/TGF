@@ -1,5 +1,6 @@
 import {
   AccessToken,
+  DataPacket_Kind,
   EncodedFileType,
   FileOutput,
   LiveKitAPI,
@@ -189,6 +190,16 @@ export async function stopLiveKitRecording(egressId, env = process.env) {
 
 export async function deleteLiveKitRoom(roomName, env = process.env) {
   return createLiveKitApi(env).room.deleteRoom(roomName);
+}
+
+export async function publishLiveClassChatMessage(roomName, messageId, env = process.env) {
+  const message = new TextEncoder().encode(JSON.stringify({ messageId }));
+  return createLiveKitApi(env).room.sendData(
+    roomName,
+    message,
+    DataPacket_Kind.RELIABLE,
+    { topic: "tgf-live-class-chat" },
+  );
 }
 
 export async function verifyLiveKitWebhook(body, authorization, env = process.env) {

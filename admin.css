@@ -6763,6 +6763,42 @@
   opacity: 0.7;
 }
 
+.livekit-connection-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 36px;
+  border: 1px solid #d6e5d7;
+  border-radius: 999px;
+  padding: 6px 12px;
+  background: #f0f8f0;
+  color: #28643a;
+  font-size: 0.85rem;
+  font-weight: 700;
+}
+
+.livekit-connection-status > span {
+  width: 9px;
+  height: 9px;
+  flex: 0 0 9px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.livekit-connection-status.is-connecting,
+.livekit-connection-status.is-reconnecting,
+.livekit-connection-status.is-waiting {
+  border-color: #ead9bd;
+  background: #fff8eb;
+  color: #855b1c;
+}
+
+.livekit-connection-status.is-failed {
+  border-color: #e8c7c1;
+  background: #fff3f1;
+  color: #842d25;
+}
+
 .livekit-header h1,
 .livekit-header p {
   margin-top: 0;
@@ -7112,6 +7148,12 @@
   overflow-wrap: anywhere;
 }
 
+.livekit-chat-message > time {
+  display: block;
+  margin-top: 5px;
+  text-align: right;
+}
+
 .livekit-chat-person {
   display: flex;
   align-items: center;
@@ -7140,8 +7182,38 @@
 .livekit-chat-avatar-fallback {
   display: grid;
   place-items: center;
+  background: #d26f35;
   color: #fff;
   font-weight: 800;
+}
+
+.livekit-chat-tutor-badge {
+  display: inline-block;
+  margin-left: 6px;
+  border-radius: 999px;
+  padding: 2px 6px;
+  background: #f2e4d6;
+  color: #7d4424;
+  font-size: 0.68rem;
+  vertical-align: middle;
+}
+
+.livekit-chat-error {
+  margin: 0;
+  color: #a13228;
+  font-size: 0.85rem;
+}
+
+.livekit-chat-retry {
+  justify-self: start;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: #a13228;
+  font: inherit;
+  font-weight: 700;
+  text-decoration: underline;
+  cursor: pointer;
 }
 
 .livekit-avatar-fallback {
@@ -7225,6 +7297,31 @@
   border-color: #71453f;
   background: #382522;
   color: #ffb3aa;
+}
+
+.livekit-page.is-dark .livekit-connection-status.is-connected {
+  border-color: #345b3e;
+  background: #1d3022;
+  color: #a8e1b4;
+}
+
+.livekit-page.is-dark .livekit-connection-status.is-connecting,
+.livekit-page.is-dark .livekit-connection-status.is-reconnecting,
+.livekit-page.is-dark .livekit-connection-status.is-waiting {
+  border-color: #655236;
+  background: #322a1b;
+  color: #e9c987;
+}
+
+.livekit-page.is-dark .livekit-connection-status.is-failed {
+  border-color: #71453f;
+  background: #382522;
+  color: #ffb3aa;
+}
+
+.livekit-page.is-dark .livekit-chat-tutor-badge {
+  background: #493426;
+  color: #f2c5a5;
 }
 
 .livekit-page.is-dark .livekit-chat-empty,
@@ -7327,6 +7424,19 @@
 
 .livekit-managed-layout .livekit-roster {
   min-height: 0;
+}
+
+.livekit-managed-sidebar .livekit-chat {
+  width: 100%;
+  min-height: 360px;
+  max-height: 520px;
+  grid-template-rows: auto minmax(120px, 1fr) auto auto;
+  padding: 14px;
+}
+
+.livekit-managed-sidebar .livekit-chat-messages {
+  min-height: 120px;
+  max-height: none;
 }
 
 .livekit-managed-layout .livekit-side-strip {
