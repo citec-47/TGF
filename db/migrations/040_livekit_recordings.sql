@@ -1,6 +1,7 @@
 ALTER TABLE tgf_live_sessions
   ADD COLUMN IF NOT EXISTS recording_provider TEXT NOT NULL DEFAULT 'cloudinary',
-  ADD COLUMN IF NOT EXISTS recording_storage_key TEXT NOT NULL DEFAULT '';
+  ADD COLUMN IF NOT EXISTS recording_storage_key TEXT NOT NULL DEFAULT '',
+  ADD COLUMN IF NOT EXISTS egress_id TEXT NOT NULL DEFAULT '';
 
 ALTER TABLE tgf_live_sessions
   DROP CONSTRAINT IF EXISTS tgf_live_sessions_recording_provider_check;
