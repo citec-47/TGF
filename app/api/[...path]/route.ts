@@ -1139,7 +1139,14 @@ async function getAdminOverview(): Promise<Response> {
         occurredAt: activity.occurred_at,
       })),
       integrations: {
-        mediasoup: { configured: process.env.MEDIASOUP_SFU_READY === "true" },
+        jitsi: {
+          configured: [
+            "JITSI_DOMAIN",
+            "JITSI_APP_ID",
+            "JITSI_KID",
+            "JITSI_PRIVATE_KEY",
+          ].every((name) => Boolean(process.env[name]?.trim())),
+        },
       },
     });
   } catch (error) {

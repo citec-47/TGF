@@ -4,6 +4,7 @@ import {
   authorizeLiveSessionJoin,
   canInitiallyPublish,
   isJoinWindowOpen,
+  transitionLiveSessionStatus,
 } from "./live-session-validation.js";
 
 const MINUTE = 60 * 1000;
@@ -54,4 +55,13 @@ test("learners and teachers can publish while administrators cannot", () => {
   assert.equal(canInitiallyPublish("learner"), true);
   assert.equal(canInitiallyPublish("teacher"), true);
   assert.equal(canInitiallyPublish("administrator"), false);
+});
+
+test("class status transitions allow start, end, and cancellation without reopening terminal states", () => {
+  assert.equal(transitionLiveSessionStatus("scheduled", "start"), "live");
+  assert.equal(transitionLiveSessionStatus("scheduled", "cancel"), "cancelled");
+  assert.equal(transitionLiveSessionStatus("live", "end"), "ended");
+  assert.equal(transitionLiveSessionStatus("live", "cancel"), "cancelled");
+  assert.equal(transitionLiveSessionStatus("ended", "start"), null);
+  assert.equal(transitionLiveSessionStatus("cancelled", "end"), null);
 });

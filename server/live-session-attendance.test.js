@@ -58,6 +58,7 @@ test("returns attendee history with API-ready timestamps and durations", async (
           microphone_allowed: false,
           full_name: "Student Example",
           first_joined_at: "2025-01-02T03:04:05.000Z",
+          is_present: true,
           attendance_seconds: 125,
         }],
       };
@@ -71,5 +72,6 @@ test("returns attendee history with API-ready timestamps and durations", async (
     microphoneAllowed: false,
     firstJoinedAt: "2025-01-02T03:04:05.000Z",
     attendanceSeconds: 125,
+    isPresent: true,
   }]);
 });

@@ -102,94 +102,21 @@ page, a daily answer form for questions and activities, and the module
 capstone at the end of Week 4. Daily answers are submitted to the assigned
 teacher for approval or feedback; this review does not change module access.
 
-## Self-hosted mediasoup live classes and private recordings
+## Jitsi JaaS live classes
 
-Live audio/video is provided by the repository's self-hosted mediasoup SFU,
-with Socket.IO signaling at `/live-class/socket.io`. A class's database session
-UUID is the room key used by both the HTTP join endpoint and the SFU. The server
-authorizes the assigned tutor, administrators, and active students with
-approved course enrollment. Students connect and register attendance while
-waiting for the tutor; the join acknowledgment includes the current class,
-participant, attendance, and chat state before live updates are delivered.
+Live audio and video are provided by Jitsi JaaS through the iFrame External API.
+The app server issues short-lived RS256 join JWTs after checking class ownership
+and approved student enrollment. Room names are random UUID-based names stored
+on the live-class record. No self-hosted SFU, WebSocket media service, TURN
+RTP range, or separate SFU process is required.
 
-The classroom puts the tutor or shared content on the main stage and participant
-tiles alongside it. Students start muted, and the server checks microphone
-permission before accepting audio. Tutor/admin mute controls update the
-permission in the attendance record and are retained across refreshes and
-reconnects. Camera or recording failure does not block joining or starting a
-class. The classroom supports audio-only mode and displays connection state.
+Run `npm run db:migrate` before starting classes. Configure `JITSI_DOMAIN`,
+`JITSI_APP_ID`, `JITSI_KID`, and `JITSI_PRIVATE_KEY` on the server. The private
+key and Cloudinary API secret must remain server-only.
 
-Class chat is stored in PostgreSQL and delivered to connected room participants
-after the server verifies the saved message. Sender name, role, profile photo,
-email, and timestamp come from the sender's account and saved message, not
-client-supplied identity. Student email addresses are visible only to the
-sender, tutor, and administrators by default. Set
-`LIVE_CLASS_CHAT_SHOW_STUDENT_EMAILS=true` only if you explicitly want all
-participants to see every sender's email.
+Set Cloudinary credentials to enable private browser recordings:
+`CLOUDINARY_CLOUD_NAME`, `CLOUDINARY_API_KEY`, and `CLOUDINARY_API_SECRET`.
+Set `LIVE_CLASS_DEBUG=true` temporarily for join and Jitsi event logs.
 
-The tutor's browser records the class in short chunks and uploads them to
-private Cloudinary storage when configured. Recording failure does not prevent
-the lesson from starting; a recording is marked ready only after the server
-verifies the private uploaded asset. Playback uses authenticated server
-endpoints that recheck role and enrollment. Legacy LiveKit recording records
-and webhook handling remain for already archived sessions only; new classes do
-not require LiveKit credentials or LiveKit Cloud.
-
-### SFU, network, and storage setup
-
-1. Run the application on its persistent custom Node server with
-   `npm run dev` or the production `npm start` command. The server initializes
-   mediasoup before accepting requests; a startup failure is surfaced rather
-   than reporting the SFU as ready.
-2. Set `MEDIASOUP_MIN_PORT` and `MEDIASOUP_MAX_PORT` to the desired RTP port
-   range (defaults `40000`–`49999`), and allow that range through the host
-   firewall and network security group over UDP and TCP. Set
-   `MEDIASOUP_LISTEN_IP=0.0.0.0`; in production set
-   `MEDIASOUP_ANNOUNCED_IP` to the server's reachable public IP. HTTPS is
-   required for browser camera/microphone access.
-3. STUN defaults to `stun:stun.l.google.com:19302`. For restrictive NATs and
-   cross-network reliability, configure a TURN service with all three of
-   `TURN_URL`, `TURN_USERNAME`, and `TURN_CREDENTIAL`; partial TURN settings
-   are rejected. STUN alone cannot guarantee connectivity through every
-   firewall. Set `LIVE_CLASS_DEBUG=true` temporarily to log join, leave,
-   transport, ICE, DTLS, and media signaling events; leave it false in normal
-   production operation. Class capacity is capped at 16 students.
-4. Configure private Cloudinary credentials (`CLOUDINARY_CLOUD_NAME`,
-   `CLOUDINARY_API_KEY`, and `CLOUDINARY_API_SECRET`) for browser recordings.
-   The class can still run if recording is unavailable. The optional
-   `LIVE_RECORDING_S3_*` variables support legacy LiveKit recording playback;
-   they are not required for new mediasoup rooms.
-5. To deliver recording-ready emails, configure `SMTP_HOST`, `SMTP_PORT`,
-   `SMTP_SECURE`, `SMTP_USER`, `SMTP_PASS`, and `MAIL_FROM`; set `APP_BASE_URL`
-   to the public HTTPS origin. In-app notifications work independently.
-6. Run `npm run db:migrate` with the server-side `DATABASE_URL` to apply all
-   pending database migrations, including the live-class attendance,
-   microphone-permission, chat, and legacy recording migrations. Keep
-   `DATABASE_URL`, `SESSION_SECRET`, TURN credentials, and Cloudinary secrets
-   server-side. Do not add them to `NEXT_PUBLIC_*`, source files, or Git.
-
-The `.vercel` project metadata does not establish that the production host
-supports a persistent Node process or mediasoup's RTP port range. Confirm the
-deployment host, firewall, public announced IP, and TURN reachability before
-releasing live classes; a static/serverless deployment cannot host this SFU.
-If the website is hosted on Vercel, use the separate SFU deployment procedure
-in [docs/LIVE_CLASS_SFU_DEPLOYMENT.md](./docs/LIVE_CLASS_SFU_DEPLOYMENT.md).
-
-### Manual live-class verification
-
-1. Sign in as the assigned tutor, open an assigned course class, and start it.
-   Confirm the class starts even if recording is unavailable.
-2. Join from two separate browsers as active students with approved enrollment.
-   Confirm the tutor is large and both student faces appear in the side strip.
-3. Try the same join link as a student without approved enrollment; the server
-   must reject the request.
-4. Confirm students join muted and cannot publish microphone audio until the
-   tutor or administrator allows it. Test per-student and all-student mute
-   controls, camera off/on, camera-permission denial, reconnecting after a
-   temporary network loss, audio-only mode, and Leave class.
-5. End the class as the tutor. Confirm all participants are disconnected and,
-   when recording is configured, the private recording is verified and marked
-   ready.
-6. Verify that approved students, the assigned tutor, and administrators can
-   play the recording, and that an unrelated account cannot. Confirm the
-   bucket remains private and email/in-app notifications are delivered.
+See [docs/LIVE_CLASS_SETUP.md](./docs/LIVE_CLASS_SETUP.md) for JaaS and
+Cloudinary setup, environment variables, and local/production deployment.

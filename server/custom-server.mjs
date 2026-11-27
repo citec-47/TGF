@@ -2,7 +2,6 @@ import "dotenv/config";
 import http from "node:http";
 import next from "next";
 import pg from "pg";
-import { createLiveClassSfu } from "./live-class-sfu.js";
 import { purgeExpiredRecordingTrash } from "./recording-trash.js";
 
 const dev = process.env.NODE_ENV !== "production";
@@ -22,9 +21,6 @@ await app.prepare();
 const server = http.createServer((request, response) => {
   void handle(request, response);
 });
-
-await createLiveClassSfu(server, pool);
-process.env.MEDIASOUP_SFU_READY = "true";
 
 let recordingTrashCleanupRunning = false;
 const recordingTrashCleanup = setInterval(async () => {

@@ -38,6 +38,7 @@ export async function listLiveSessionAttendees(pool, sessionId) {
     `SELECT attendance.user_id, attendance.participant_role, attendance.microphone_allowed,
             learner.full_name,
             attendance.first_joined_at,
+            (attendance.current_joined_at IS NOT NULL) AS is_present,
             attendance.total_seconds +
               CASE WHEN attendance.current_joined_at IS NOT NULL
                 THEN GREATEST(0, FLOOR(EXTRACT(EPOCH FROM (NOW() - attendance.current_joined_at)))::integer)
@@ -61,6 +62,7 @@ export async function listLiveSessionAttendees(pool, sessionId) {
       microphoneAllowed: row.microphone_allowed,
       firstJoinedAt: firstJoinedAt.toISOString(),
       attendanceSeconds: Number(row.attendance_seconds),
+      isPresent: row.is_present,
     };
   });
 }

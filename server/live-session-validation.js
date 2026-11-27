@@ -28,3 +28,11 @@ export function authorizeLiveSessionJoin({ role, userId, teacherId, enrolled }) 
 export function canInitiallyPublish(role) {
   return role === "teacher" || role === "learner";
 }
+
+export function transitionLiveSessionStatus(status, action) {
+  const transitions = {
+    scheduled: { start: "live", cancel: "cancelled" },
+    live: { end: "ended", cancel: "cancelled" },
+  };
+  return transitions[status]?.[action] || null;
+}
