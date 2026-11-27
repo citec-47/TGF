@@ -45,6 +45,23 @@ test("validates UUIDs and the configured class, TURN, and recording limits", () 
   });
   assert.equal(config.maxStudents, 16);
   assert.equal(config.iceServers[0].urls, "turn:turn.example.test:3478");
+  assert.equal(config.iceServers[0].username, "student");
+  assert.equal(config.iceServers[0].credential, "credential");
+  assert.equal(config.iceServers[1].urls, "stun:stun.l.google.com:19302");
   assert.throws(() => getLiveClassConfig({ LIVE_CLASS_MAX_STUDENTS: "17" }), /between 1 and 16/);
   assert.throws(() => getLiveClassConfig({ RECORDING_PART_MINUTES: "0" }), /RECORDING_PART_MINUTES/);
+  assert.throws(() => getLiveClassConfig({
+    TURN_URL: "turn:turn.example.test:3478",
+  }), /Set TURN_URL, TURN_USERNAME, and TURN_CREDENTIAL together/);
+  assert.throws(() => getLiveClassConfig({
+    NODE_ENV: "production",
+    MEDIASOUP_ANNOUNCED_IP: "",
+  }), /MEDIASOUP_ANNOUNCED_IP/);
+});
+
+test("provides a default STUN server when no TURN service is configured", () => {
+  const config = getLiveClassConfig({});
+  assert.deepEqual(config.iceServers, [
+    { urls: "stun:stun.l.google.com:19302" },
+  ]);
 });

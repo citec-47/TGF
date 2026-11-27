@@ -102,101 +102,81 @@ page, a daily answer form for questions and activities, and the module
 capstone at the end of Week 4. Daily answers are submitted to the assigned
 teacher for approval or feedback; this review does not change module access.
 
-## Managed live classes and private recordings
+## Self-hosted mediasoup live classes and private recordings
 
-Live classes use LiveKit Cloud for managed WebRTC rooms and optional Egress
-recordings. The responsive React classroom puts the tutor or tutor screen share
-on the main stage and participants in a paginated side strip. PostgreSQL-backed
-server checks issue room-scoped tokens only to the assigned tutor, active
-administrators, and students with an approved course enrollment. Students can
-join the room while waiting for the tutor; the client rechecks current class
-state after subscribing to room events so a missed start event does not strand
-them in the waiting room. The room reports connecting, connected, reconnecting,
-waiting and failed states.
+Live audio/video is provided by the repository's self-hosted mediasoup SFU,
+with Socket.IO signaling at `/live-class/socket.io`. A class's database session
+UUID is the room key used by both the HTTP join endpoint and the SFU. The server
+authorizes the assigned tutor, administrators, and active students with
+approved course enrollment. Students connect and register attendance while
+waiting for the tutor; the join acknowledgment includes the current class,
+participant, attendance, and chat state before live updates are delivered.
 
-Students join with camera permission but no microphone-publish permission.
-Only the assigned tutor or an administrator can enable or revoke a student's
-microphone through a server-authorized LiveKit permission update. The setting
-is persisted with session attendance and applied to subsequent joins.
-Participant and attendance changes are refreshed in real time. Learner camera
-video starts at low resolution, and the classroom supports manual audio-only
-mode and switches off local video when LiveKit reports a poor connection.
-Camera or video failure does not block audio participation.
+The classroom puts the tutor or shared content on the main stage and participant
+tiles alongside it. Students start muted, and the server checks microphone
+permission before accepting audio. Tutor/admin mute controls update the
+permission in the attendance record and are retained across refreshes and
+reconnects. Camera or recording failure does not block joining or starting a
+class. The classroom supports audio-only mode and displays connection state.
 
-Class chat is persisted per session, authorized using the same course
-enrollment, and delivered through reliable LiveKit room data; messages load
-from the server after joining or refreshing.
+Class chat is stored in PostgreSQL and delivered to connected room participants
+after the server verifies the saved message. Sender name, role, profile photo,
+email, and timestamp come from the sender's account and saved message, not
+client-supplied identity. Student email addresses are visible only to the
+sender, tutor, and administrators by default. Set
+`LIVE_CLASS_CHAT_SHOW_STUDENT_EMAILS=true` only if you explicitly want all
+participants to see every sender's email.
 
-Chat sender names, role and profile photo are read from the account record.
-Student email addresses are visible only to the sender, tutor and
-administrators by default. Set `LIVE_CLASS_CHAT_SHOW_STUDENT_EMAILS=true` in
-the server environment only if you explicitly want every participant to see
-all sender emails.
+The tutor's browser records the class in short chunks and uploads them to
+private Cloudinary storage when configured. Recording failure does not prevent
+the lesson from starting; a recording is marked ready only after the server
+verifies the private uploaded asset. Playback uses authenticated server
+endpoints that recheck role and enrollment. Legacy LiveKit recording records
+and webhook handling remain for already archived sessions only; new classes do
+not require LiveKit credentials or LiveKit Cloud.
 
-The tutor starts and ends the session in the classroom. When Egress and private
-object storage are configured, LiveKit records the room to an S3-compatible
-bucket (Cloudflare R2 is the recommended low-cost option). Recording failure
-does not prevent the live lesson from starting. The app only marks a recording
-ready after Egress completes and the server verifies the MP4 exists. Playback
-streams through an authenticated server endpoint that rechecks the viewer's
-role/enrollment; the bucket must not be made public. Enrolled students, the
-assigned tutor, and administrators receive in-app notifications and, when
-SMTP is configured, recording-ready emails.
+### SFU, network, and storage setup
 
-### Provider and storage setup
-
-1. Create a LiveKit Cloud account and project. LiveKit currently lists a $0
-   Build plan; real-time media and recording/export usage is metered by time
-   and data transfer, so check project quotas and current rates before
-   production use. This app does not use LiveKit's agent or inference products.
-   See [LiveKit Cloud pricing](https://livekit.com/pricing) and
-   [LiveKit billing details](https://docs.livekit.io/deploy/admin/billing/).
-2. From the project settings, copy its WebSocket URL, API key, and API secret.
-   Set `LIVEKIT_URL`, `LIVEKIT_API_KEY`, and `LIVEKIT_API_SECRET` in `.env` and
-   in the production server's secret manager. Use `wss://` in production.
-3. Create a **private** Cloudflare R2 bucket and an S3-compatible key with
-   object read/write access for that bucket. Set `LIVE_RECORDING_S3_BUCKET`,
-   `LIVE_RECORDING_S3_REGION=auto`,
-   `LIVE_RECORDING_S3_ENDPOINT=https://<account-id>.r2.cloudflarestorage.com`,
-   `LIVE_RECORDING_S3_ACCESS_KEY`, and `LIVE_RECORDING_S3_SECRET`. Keep bucket
-   public access disabled. R2 Standard currently includes 10 GB-month storage,
-   1 million Class A requests, and 10 million Class B requests monthly; beyond
-   that, storage and request charges apply, with no egress bandwidth charge.
-   See [Cloudflare R2 pricing](https://developers.cloudflare.com/r2/pricing/).
-   `LIVE_RECORDING_S3_PREFIX` is optional and defaults to `tgfvp/live-classes`.
-   AWS S3 can be used instead by setting its bucket, region, HTTPS endpoint,
-   and credentials.
-4. In LiveKit Cloud project settings, add the webhook URL
-   `https://<your-domain>/api/collaboration/livekit/webhook`. The endpoint
-   verifies LiveKit's signature with the project API credentials and consumes
-   Egress completion events. Do not expose this endpoint through a proxy that
-   changes the request body or authorization header.
-5. To deliver emails, configure the existing `SMTP_HOST`, `SMTP_PORT`,
-   `SMTP_SECURE`, `SMTP_USER`, `SMTP_PASS`, and `MAIL_FROM` variables. Set
-   `APP_BASE_URL` to the public HTTPS origin so the email link points to the
-   deployed site. In-app notifications work independently; incomplete SMTP
-   configuration is logged by the server.
-6. Run `npm run db:migrate` against the production `DATABASE_URL` to apply
-   migration `040_livekit_recordings.sql` and any other pending migrations,
-   including `041_live_session_chat.sql` and
-   `042_live_class_microphone_permissions.sql`, then restart the Node server.
-   Keep `DATABASE_URL`, `SESSION_SECRET`, and all provider credentials
+1. Run the application on its persistent custom Node server with
+   `npm run dev` or the production `npm start` command. The server initializes
+   mediasoup before accepting requests; a startup failure is surfaced rather
+   than reporting the SFU as ready.
+2. Set `MEDIASOUP_MIN_PORT` and `MEDIASOUP_MAX_PORT` to the desired RTP port
+   range (defaults `40000`–`49999`), and allow that range through the host
+   firewall and network security group over UDP and TCP. Set
+   `MEDIASOUP_LISTEN_IP=0.0.0.0`; in production set
+   `MEDIASOUP_ANNOUNCED_IP` to the server's reachable public IP. HTTPS is
+   required for browser camera/microphone access.
+3. STUN defaults to `stun:stun.l.google.com:19302`. For restrictive NATs and
+   cross-network reliability, configure a TURN service with all three of
+   `TURN_URL`, `TURN_USERNAME`, and `TURN_CREDENTIAL`; partial TURN settings
+   are rejected. STUN alone cannot guarantee connectivity through every
+   firewall. Set `LIVE_CLASS_DEBUG=true` temporarily to log join, leave,
+   transport, ICE, DTLS, and media signaling events; leave it false in normal
+   production operation. Class capacity is capped at 16 students.
+4. Configure private Cloudinary credentials (`CLOUDINARY_CLOUD_NAME`,
+   `CLOUDINARY_API_KEY`, and `CLOUDINARY_API_SECRET`) for browser recordings.
+   The class can still run if recording is unavailable. The optional
+   `LIVE_RECORDING_S3_*` variables support legacy LiveKit recording playback;
+   they are not required for new mediasoup rooms.
+5. To deliver recording-ready emails, configure `SMTP_HOST`, `SMTP_PORT`,
+   `SMTP_SECURE`, `SMTP_USER`, `SMTP_PASS`, and `MAIL_FROM`; set `APP_BASE_URL`
+   to the public HTTPS origin. In-app notifications work independently.
+6. Run `npm run db:migrate` with the server-side `DATABASE_URL` to apply all
+   pending database migrations, including the live-class attendance,
+   microphone-permission, chat, and legacy recording migrations. Keep
+   `DATABASE_URL`, `SESSION_SECRET`, TURN credentials, and Cloudinary secrets
    server-side. Do not add them to `NEXT_PUBLIC_*`, source files, or Git.
 
-LiveKit Cloud replaces the custom mediasoup SFU and browser-side chunk
-recording, so the app server no longer needs the mediasoup UDP port range or a
-self-hosted TURN service for classes. The site still runs as the existing
-Next.js App Router application on its custom persistent Node server; configure
-that server with the environment variables above. The `.vercel` project
-metadata in this repository does not establish that the current production
-host runs the custom server, so confirm the live deployment target before
-releasing the feature.
+The `.vercel` project metadata does not establish that the production host
+supports a persistent Node process or mediasoup's RTP port range. Confirm the
+deployment host, firewall, public announced IP, and TURN reachability before
+releasing live classes; a static/serverless deployment cannot host this SFU.
 
 ### Manual live-class verification
 
 1. Sign in as the assigned tutor, open an assigned course class, and start it.
-   Confirm the class starts even if recording is unavailable; when Egress is
-   configured, confirm the recording badge appears.
+   Confirm the class starts even if recording is unavailable.
 2. Join from two separate browsers as active students with approved enrollment.
    Confirm the tutor is large and both student faces appear in the side strip.
 3. Try the same join link as a student without approved enrollment; the server
@@ -206,8 +186,8 @@ releasing the feature.
    controls, camera off/on, camera-permission denial, reconnecting after a
    temporary network loss, audio-only mode, and Leave class.
 5. End the class as the tutor. Confirm all participants are disconnected and,
-   when recording is configured, the recording changes from processing to ready
-   after the Egress webhook.
+   when recording is configured, the private recording is verified and marked
+   ready.
 6. Verify that approved students, the assigned tutor, and administrators can
    play the recording, and that an unrelated account cannot. Confirm the
    bucket remains private and email/in-app notifications are delivered.

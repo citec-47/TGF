@@ -9,10 +9,17 @@ import {
 } from "./live-session-attendance.js";
 
 const rooms = new Map();
+const roomInitializations = new Map();
+const debugEnabled = process.env.LIVE_CLASS_DEBUG === "true";
+
+function logEvent(event, details = {}) {
+  if (debugEnabled) console.info("[live-class]", event, details);
+}
 
 function uniqueParticipants(room) {
-  return [...room.participants.values()]
-    .map(({ id, name, role, micAllowed, cameraOn, raisedHand, profilePhotoUrl }) => ({
+  const participants = new Map();
+  for (const { id, name, role, micAllowed, cameraOn, raisedHand, profilePhotoUrl } of room.participants.values()) {
+    participants.set(id, {
       id,
       name,
       role,
@@ -20,7 +27,9 @@ function uniqueParticipants(room) {
       cameraOn,
       raisedHand,
       profilePhotoUrl,
-    }));
+    });
+  }
+  return [...participants.values()];
 }
 
 export async function createLiveClassSfu(httpServer, pool) {
@@ -63,6 +72,30 @@ export async function createLiveClassSfu(httpServer, pool) {
     return result.rows[0] || null;
   }
 
+  async function getChatMessages(sessionId, viewer) {
+    const result = await pool.query(
+      `SELECT message.id, message.sender_user_id, message.body, message.created_at,
+              sender.full_name, sender.email, sender.profile_photo_url, sender.role
+       FROM tgf_live_session_chat_messages message
+       JOIN tgf_users sender ON sender.id = message.sender_user_id
+       WHERE message.session_id = $1
+       ORDER BY message.created_at, message.id`,
+      [sessionId],
+    );
+    const showAllEmails = process.env.LIVE_CLASS_CHAT_SHOW_STUDENT_EMAILS?.trim().toLowerCase() === "true";
+    return result.rows.map((row) => ({
+      id: row.id,
+      senderId: row.sender_user_id,
+      name: row.full_name,
+      email: showAllEmails || viewer.role === "teacher" || viewer.role === "administrator" ||
+        viewer.id === row.sender_user_id ? row.email : "",
+      role: row.role,
+      profilePhotoUrl: row.profile_photo_url || "",
+      body: row.body,
+      createdAt: new Date(row.created_at).toISOString(),
+    }));
+  }
+
   async function authorize(socket, sessionId) {
     const user = await authenticateLiveClassCookie(
       socket.handshake.headers.cookie,
@@ -97,24 +130,34 @@ export async function createLiveClassSfu(httpServer, pool) {
   async function getRoom(sessionId) {
     let room = rooms.get(sessionId);
     if (room) return room;
-    const worker = workers[workerIndex % workers.length];
-    workerIndex += 1;
-    const router = await worker.createRouter({
-      mediaCodecs: [
-        { kind: "audio", mimeType: "audio/opus", clockRate: 48000, channels: 2 },
-        { kind: "video", mimeType: "video/VP8", clockRate: 90000, parameters: { xGoogleStartBitrate: 1000 } },
-        { kind: "video", mimeType: "video/H264", clockRate: 90000, parameters: { packetizationMode: 1, profileLevelId: "42e01f" } },
-      ],
-    });
-    room = {
-      sessionId,
-      router,
-      participants: new Map(),
-      started: false,
-      teacherId: null,
-    };
-    rooms.set(sessionId, room);
-    return room;
+    const pending = roomInitializations.get(sessionId);
+    if (pending) return pending;
+    const initialization = (async () => {
+      const worker = workers[workerIndex % workers.length];
+      workerIndex += 1;
+      const router = await worker.createRouter({
+        mediaCodecs: [
+          { kind: "audio", mimeType: "audio/opus", clockRate: 48000, channels: 2 },
+          { kind: "video", mimeType: "video/VP8", clockRate: 90000, parameters: { xGoogleStartBitrate: 1000 } },
+          { kind: "video", mimeType: "video/H264", clockRate: 90000, parameters: { packetizationMode: 1, profileLevelId: "42e01f" } },
+        ],
+      });
+      room = {
+        sessionId,
+        router,
+        participants: new Map(),
+        started: false,
+        teacherId: null,
+      };
+      rooms.set(sessionId, room);
+      return room;
+    })();
+    roomInitializations.set(sessionId, initialization);
+    try {
+      return await initialization;
+    } finally {
+      roomInitializations.delete(sessionId);
+    }
   }
 
   io.on("connection", (socket) => {
@@ -123,6 +166,7 @@ export async function createLiveClassSfu(httpServer, pool) {
       let attendanceStarted = false;
       let attendanceParticipantId;
       let participantRegistered = false;
+      let roomJoined = false;
       try {
         sessionId = payload?.sessionId;
         if (!isLiveClassUuid(sessionId)) throw new Error("Choose a valid live class.");
@@ -131,10 +175,16 @@ export async function createLiveClassSfu(httpServer, pool) {
           count + (candidate.sessionId === sessionId ? candidate.participants.size : 0), 0) >= config.maxStudents + 1) {
           throw new Error("This live class is full.");
         }
-        const room = await getRoom(sessionId);
-        if (authorization.session.started_at && !room.started) {
-          room.started = true;
+        await socket.join(sessionId);
+        roomJoined = true;
+        if (!socket.connected) {
+          await socket.leave(sessionId);
+          return;
         }
+        const room = await getRoom(sessionId);
+        const currentSession = await getSessionRow(sessionId);
+        if (!currentSession || currentSession.ended_at) throw new Error("This class has ended.");
+        room.started = Boolean(currentSession.started_at);
         if (authorization.role === "teacher") room.teacherId = authorization.user.id;
         if (authorization.role === "student") {
           await markLiveSessionParticipantJoined(pool, sessionId, authorization.user.id);
@@ -142,8 +192,12 @@ export async function createLiveClassSfu(httpServer, pool) {
           attendanceParticipantId = authorization.user.id;
         }
         const attendees = await listLiveSessionAttendees(pool, sessionId);
-        await socket.join(sessionId);
+        const attendee = attendees.find(({ id }) => id === authorization.user.id);
+        const micAllowed = authorization.role !== "student" || attendee?.microphoneAllowed === true;
+        const chatMessages = await getChatMessages(sessionId, authorization.user);
         if (!socket.connected) {
+          await socket.leave(sessionId);
+          roomJoined = false;
           if (attendanceStarted) {
             await markLiveSessionParticipantLeft(pool, sessionId, authorization.user.id);
             attendanceStarted = false;
@@ -155,7 +209,7 @@ export async function createLiveClassSfu(httpServer, pool) {
           name: authorization.user.full_name,
           role: authorization.role,
           profilePhotoUrl: authorization.user.profile_photo_url || "",
-          micAllowed: authorization.role === "teacher",
+          micAllowed,
           cameraOn: false,
           videoEnabled: true,
           raisedHand: false,
@@ -178,18 +232,27 @@ export async function createLiveClassSfu(httpServer, pool) {
                 source: producer.appData.source,
               }))),
           started: room.started, session: { programmeTitle: authorization.session.programme_title,
-            teacherName: authorization.session.teacher_name } });
+            teacherName: authorization.session.teacher_name }, chatMessages });
+        logEvent("participant joined", {
+          sessionId,
+          participantId: authorization.user.id,
+          role: authorization.role,
+          started: room.started,
+        });
         socket.to(sessionId).emit("live-class:participant-state", {
           id: authorization.user.id,
           name: authorization.user.full_name,
           role: authorization.role,
           profilePhotoUrl: authorization.user.profile_photo_url || "",
-          micAllowed: authorization.role === "teacher",
+          micAllowed,
           cameraOn: false,
           raisedHand: false,
         });
         io.to(sessionId).emit("live-class:attendees", attendees);
       } catch (error) {
+        if (roomJoined && !participantRegistered) {
+          await socket.leave(sessionId);
+        }
         if (attendanceStarted && !participantRegistered) {
           try {
             const participant = rooms.get(sessionId)?.participants.get(socket.id);
@@ -221,7 +284,11 @@ export async function createLiveClassSfu(httpServer, pool) {
         });
         participant.transports.set(transport.id, transport);
         transport.on("routerclose", () => participant.transports.delete(transport.id));
+        transport.on("icestatechange", (state) => {
+          logEvent("ICE state", { sessionId, participantId: participant.id, direction: payload?.direction, state });
+        });
         transport.on("dtlsstatechange", (state) => {
+          logEvent("DTLS state", { sessionId, participantId: participant.id, direction: payload?.direction, state });
           if (state === "closed" || state === "failed") participant.transports.delete(transport.id);
         });
         ack?.({ ok: true, params: {
@@ -229,7 +296,8 @@ export async function createLiveClassSfu(httpServer, pool) {
           iceParameters: transport.iceParameters,
           iceCandidates: transport.iceCandidates,
           dtlsParameters: transport.dtlsParameters,
-        } });
+        }, iceServers: config.iceServers });
+        logEvent("transport created", { sessionId, participantId: participant.id, direction: payload?.direction });
       } catch (error) {
         ack?.({ ok: false, error: error instanceof Error ? error.message : "Media transport could not be created." });
       }
@@ -244,6 +312,7 @@ export async function createLiveClassSfu(httpServer, pool) {
         const transport = entry?.participant.transports.get(payload?.transportId);
         if (!transport) throw new Error("Media transport was not found.");
         await transport.connect({ dtlsParameters: payload.dtlsParameters });
+        logEvent("transport connected", { participantId: entry.participant.id, transportId: transport.id });
         ack?.({ ok: true });
       } catch (error) {
         ack?.({ ok: false, error: error instanceof Error ? error.message : "Media transport could not connect." });
@@ -261,7 +330,7 @@ export async function createLiveClassSfu(httpServer, pool) {
         if (!transport) throw new Error("Send transport was not found.");
         if (payload.kind === "audio" && entry.participant.role !== "teacher" &&
             !entry.participant.micAllowed) {
-          throw new Error("Teacher unmuted you.");
+          throw new Error("The tutor has muted your microphone.");
         }
         const producer = await transport.produce({
           kind: payload.kind,
@@ -273,6 +342,12 @@ export async function createLiveClassSfu(httpServer, pool) {
           },
         });
         entry.participant.producers.set(producer.id, producer);
+        logEvent("media produced", {
+          sessionId: entry.sessionId,
+          participantId: entry.participant.id,
+          kind: payload.kind,
+          producerId: producer.id,
+        });
         const syncCameraState = () => {
           if (payload.kind !== "video") return;
           entry.participant.cameraOn = entry.participant.videoEnabled &&
@@ -377,21 +452,44 @@ export async function createLiveClassSfu(httpServer, pool) {
       }
     });
 
-    socket.on("live-class:chat", (payload) => {
-      const body = typeof payload?.body === "string" ? payload.body.trim().slice(0, 500) : "";
-      if (!body) return;
-      for (const room of rooms.values()) {
-        const participant = room.participants.get(socket.id);
-        if (!participant) continue;
-        const message = {
-          participantId: participant.id,
-          name: participant.name,
-          role: participant.role,
-          profilePhotoUrl: participant.profilePhotoUrl || "",
-          body,
-        };
-        io.to(room.sessionId).emit("live-class:chat", message);
-        break;
+    socket.on("live-class:chat-published", async (payload, ack) => {
+      try {
+        const entry = [...rooms.entries()].map(([sessionId, room]) => ({
+          sessionId,
+          room,
+          participant: room.participants.get(socket.id),
+        })).find(({ participant }) => participant);
+        if (!entry) throw new Error("Join the live class before sending chat.");
+        if (!isLiveClassUuid(payload?.messageId)) throw new Error("The chat message ID is invalid.");
+        const result = await pool.query(
+          `SELECT message.id, message.sender_user_id, message.body, message.created_at,
+                  sender.full_name, sender.email, sender.profile_photo_url, sender.role
+           FROM tgf_live_session_chat_messages message
+           JOIN tgf_users sender ON sender.id = message.sender_user_id
+           WHERE message.id = $1 AND message.session_id = $2`,
+          [payload.messageId, entry.sessionId],
+        );
+        const row = result.rows[0];
+        if (!row || row.sender_user_id !== entry.participant.id) {
+          throw new Error("Only the message sender can share it with the class.");
+        }
+        const showAllEmails = process.env.LIVE_CLASS_CHAT_SHOW_STUDENT_EMAILS?.trim().toLowerCase() === "true";
+        for (const [targetSocket, recipient] of entry.room.participants.entries()) {
+          io.to(targetSocket).emit("live-class:chat", {
+            id: row.id,
+            senderId: row.sender_user_id,
+            name: row.full_name,
+            email: showAllEmails || recipient.role === "teacher" ||
+              recipient.role === "administrator" || recipient.id === row.sender_user_id ? row.email : "",
+            role: row.role,
+            profilePhotoUrl: row.profile_photo_url || "",
+            body: row.body,
+            createdAt: new Date(row.created_at).toISOString(),
+          });
+        }
+        ack?.({ ok: true });
+      } catch (error) {
+        ack?.({ ok: false, error: error instanceof Error ? error.message : "The chat message could not be shared." });
       }
     });
 
@@ -400,24 +498,77 @@ export async function createLiveClassSfu(httpServer, pool) {
         const entry = [...rooms.entries()].map(([sessionId, room]) => ({
           sessionId,
           room,
-        })).find(({ room }) => room.participants.get(socket.id)?.role === "teacher");
-        if (!entry) throw new Error("Only the teacher can control microphones.");
+        })).find(({ room }) => {
+          const role = room.participants.get(socket.id)?.role;
+          return role === "teacher" || role === "administrator";
+        });
+        if (!entry) throw new Error("Only the teacher or an administrator can control microphones.");
         const targetId = payload?.participantId;
         const allow = payload?.allow === true;
-        for (const participant of entry.room.participants.values()) {
-          if (targetId !== "all" && participant.id !== targetId) continue;
+        if (targetId !== "all" && !isLiveClassUuid(targetId)) {
+          throw new Error("Choose a valid student or all students.");
+        }
+        const participants = [...entry.room.participants.entries()]
+          .filter(([, participant]) => participant.role === "student" &&
+            (targetId === "all" || participant.id === targetId));
+        if (targetId !== "all" && participants.length === 0) {
+          throw new Error("That student is no longer connected to this class.");
+        }
+        if (targetId === "all") {
+          await pool.query(
+            `UPDATE tgf_live_session_attendance
+             SET microphone_allowed = $2
+             WHERE session_id = $1 AND participant_role = 'learner'`,
+            [entry.sessionId, allow],
+          );
+        } else {
+          await pool.query(
+            `UPDATE tgf_live_session_attendance
+             SET microphone_allowed = $3
+             WHERE session_id = $1 AND user_id = $2 AND participant_role = 'learner'`,
+            [entry.sessionId, targetId, allow],
+          );
+        }
+        for (const [targetSocket, participant] of participants) {
           participant.micAllowed = allow;
-          const targetSocket = [...entry.room.participants.entries()]
-            .find(([, item]) => item === participant)?.[0];
+          if (!allow) {
+            for (const producer of participant.producers.values()) {
+              if (producer.kind === "audio" && !producer.paused) await producer.pause();
+            }
+          }
           io.to(targetSocket).emit("live-class:microphone", {
             allowed: allow,
             message: allow ? "Teacher unmuted you" : "Teacher muted you",
           });
         }
         io.to(entry.sessionId).emit("live-class:participants", uniqueParticipants(entry.room));
+        logEvent("microphone permission changed", { sessionId: entry.sessionId, targetId, allow });
         ack?.({ ok: true });
       } catch (error) {
         ack?.({ ok: false, error: error instanceof Error ? error.message : "Microphone control failed." });
+      }
+    });
+
+    socket.on("live-class:microphone-self", async (payload, ack) => {
+      try {
+        const entry = [...rooms.entries()].map(([sessionId, room]) => ({
+          sessionId,
+          room,
+          participant: room.participants.get(socket.id),
+        })).find(({ participant }) => participant);
+        if (!entry) throw new Error("Join the live class before changing your microphone.");
+        if (typeof payload?.enabled !== "boolean") throw new Error("Choose whether your microphone is on.");
+        if (entry.participant.role === "student" && !entry.participant.micAllowed) {
+          throw new Error("The tutor has muted your microphone.");
+        }
+        for (const producer of entry.participant.producers.values()) {
+          if (producer.kind !== "audio") continue;
+          if (payload.enabled && producer.paused) await producer.resume();
+          else if (!payload.enabled && !producer.paused) await producer.pause();
+        }
+        ack?.({ ok: true });
+      } catch (error) {
+        ack?.({ ok: false, error: error instanceof Error ? error.message : "The microphone state could not be updated." });
       }
     });
 
@@ -425,14 +576,18 @@ export async function createLiveClassSfu(httpServer, pool) {
       try {
         const entry = [...rooms.entries()].find(([, room]) => room.participants.get(socket.id)?.role === "teacher");
         if (!entry) throw new Error("Only the assigned teacher can start this class.");
-        entry[1].started = true;
-        await pool.query(
-          `UPDATE tgf_live_sessions
-           SET started_at = COALESCE(started_at, NOW()), recording_status = 'recording', updated_at = NOW()
-           WHERE id = $1 AND ended_at IS NULL`,
+        const session = await pool.query(
+          `SELECT started_at, ended_at
+           FROM tgf_live_sessions
+           WHERE id = $1`,
           [entry[0]],
         );
+        if (!session.rows[0]?.started_at || session.rows[0].ended_at) {
+          throw new Error("Start the class from the classroom controls first.");
+        }
+        entry[1].started = true;
         io.to(entry[0]).emit("live-class:started", { started: true });
+        logEvent("class started", { sessionId: entry[0] });
         ack?.({ ok: true });
       } catch (error) {
         ack?.({ ok: false, error: error instanceof Error ? error.message : "The class could not be started." });
@@ -466,8 +621,12 @@ export async function createLiveClassSfu(httpServer, pool) {
       for (const [sessionId, room] of rooms.entries()) {
         const participant = room.participants.get(socket.id);
         if (!participant) continue;
+        for (const consumer of participant.consumers.values()) consumer.close();
+        for (const producer of participant.producers.values()) producer.close();
+        for (const transport of participant.transports.values()) transport.close();
         room.participants.delete(socket.id);
         io.to(sessionId).emit("live-class:participants", uniqueParticipants(room));
+        logEvent("participant disconnected", { sessionId, participantId: participant.id, role: participant.role });
         if (participant.role === "student" &&
             ![...room.participants.values()].some((item) => item.id === participant.id && item.role === "student")) {
           try {
@@ -476,6 +635,10 @@ export async function createLiveClassSfu(httpServer, pool) {
           } catch (error) {
             console.error("Could not save live-class attendance after disconnect.", error);
           }
+        }
+        if (room.participants.size === 0) {
+          room.router.close();
+          rooms.delete(sessionId);
         }
         break;
       }

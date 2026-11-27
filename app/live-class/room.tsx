@@ -37,7 +37,7 @@ interface JoinResponse {
   started?: boolean;
   startsAt?: string;
   waitingForTeacher?: boolean;
-  transport?: "mediasoup";
+  transport: "mediasoup";
   socketPath?: string;
 }
 
@@ -118,11 +118,21 @@ interface MediaProducer {
 }
 
 interface ChatMessage {
-  participantId?: string;
+  id: string;
+  senderId: string;
   name: string;
-  role?: "teacher" | "student" | "administrator";
+  email: string;
+  role: "teacher" | "learner" | "student" | "administrator";
   profilePhotoUrl?: string;
   body: string;
+  createdAt: string;
+}
+
+function mergeChatMessages(existing: ChatMessage[], incoming: ChatMessage[]): ChatMessage[] {
+  const messages = new Map<string, ChatMessage>();
+  for (const message of [...existing, ...incoming]) messages.set(message.id, message);
+  return [...messages.values()].sort((first, second) =>
+    new Date(first.createdAt).getTime() - new Date(second.createdAt).getTime());
 }
 
 interface NetworkInformation extends EventTarget {
@@ -297,6 +307,10 @@ export default function LiveClassRoom() {
   const [raisedHand, setRaisedHand] = useState(false);
   const [chatDraft, setChatDraft] = useState("");
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
+  const [chatError, setChatError] = useState("");
+  const [chatSending, setChatSending] = useState(false);
+  const chatMessageIdRef = useRef("");
+  const chatMessagesRef = useRef<HTMLDivElement | null>(null);
   const [selfProfile, setSelfProfile] = useState<{ id?: string; name: string; role?: string; profilePhotoUrl?: string }>({
     name: "You",
   });
@@ -331,6 +345,11 @@ export default function LiveClassRoom() {
     const interval = window.setInterval(updateElapsed, 1000);
     return () => window.clearInterval(interval);
   }, [recordingStatus]);
+
+  useEffect(() => {
+    const container = chatMessagesRef.current;
+    if (container) container.scrollTop = container.scrollHeight;
+  }, [chatMessages]);
 
   function refreshRemoteAudio() {
     const audio = remoteAudioRef.current;
@@ -564,7 +583,7 @@ export default function LiveClassRoom() {
         if (!transportResult.ok) throw new Error(transportResult.error);
         const transport = deviceRef.current.createRecvTransport({
           ...transportResult.params,
-          iceServers: [],
+          iceServers: transportResult.iceServers || [],
         });
         receiveTransportRef.current = transport;
         transport.on("connect", async ({ dtlsParameters }: any, callback: () => void, errback: (error: Error) => void) => {
@@ -659,7 +678,7 @@ export default function LiveClassRoom() {
     const transport = sendTransportRef.current ??
       deviceRef.current!.createSendTransport({
         ...result.params,
-        iceServers: [],
+        iceServers: result.iceServers || [],
       });
     sendTransportRef.current = transport;
     transport.on("connect", async ({ dtlsParameters }: any, callback: () => void, errback: (error: Error) => void) => {
@@ -766,6 +785,16 @@ export default function LiveClassRoom() {
         await producerRef.current.microphone.resume();
       }
     }
+    if (socketRef.current?.connected && deviceRef.current) {
+      const response = await socketRequest<any>("live-class:microphone-self", { enabled: true });
+      if (!response.ok) throw new Error(response.error);
+    }
+  }
+
+  async function synchronizeMicrophone(enabled: boolean) {
+    if (!socketRef.current?.connected) return;
+    const response = await socketRequest<any>("live-class:microphone-self", { enabled });
+    if (!response.ok) throw new Error(response.error);
   }
 
   async function toggleMicrophone() {
@@ -791,6 +820,7 @@ export default function LiveClassRoom() {
             await producerRef.current.microphone.pause();
           }
         }
+        await synchronizeMicrophone(nextEnabled);
       }
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Microphone unavailable.");
@@ -1146,22 +1176,46 @@ export default function LiveClassRoom() {
         try {
           await openCamera();
         } catch (cameraError) {
-          setError(cameraError instanceof Error ? cameraError.message : "Camera unavailable. Continuing with audio.");
+          setNotice(cameraError instanceof Error
+            ? `${cameraError.message} The class will continue without video.`
+            : "Camera unavailable. The class will continue without video.");
         }
       }
-      await openMicrophone();
       if (!info?.sessionId) throw new Error("The live class session is unavailable.");
-      await startAutomaticRecording(info.sessionId);
+      let microphoneAvailable = true;
+      try {
+        await openMicrophone();
+      } catch (reason) {
+        microphoneAvailable = false;
+        setNotice(reason instanceof Error ? reason.message : "Microphone unavailable. The class can still start.");
+      }
+      let recordingAvailable = false;
+      if (microphoneAvailable) {
+        try {
+          await startAutomaticRecording(info.sessionId);
+          recordingAvailable = mediaRecorderRef.current?.state === "recording";
+        } catch (reason) {
+          setNotice(reason instanceof Error
+            ? `${reason.message} The class will continue without a recording.`
+            : "Recording could not start. The class will continue without a recording.");
+        }
+      }
+      const response = await fetch(
+        `/api/collaboration/sessions/${encodeURIComponent(info.sessionId)}/start`,
+        {
+          method: "POST",
+          credentials: "same-origin",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ recordingAvailable }),
+        },
+      );
+      const result = await response.json() as { error?: string };
+      if (!response.ok) throw new Error(result.error || "The class could not be started.");
       if (socketRef.current?.connected) {
-        const response = await socketRequest<any>("live-class:start");
-        if (!response.ok) throw new Error(response.error);
-      } else {
-        const response = await fetch(
-          `/api/collaboration/sessions/${encodeURIComponent(info.sessionId)}/start`,
-          { method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/json" }, body: "{}" },
-        );
-        const result = await response.json() as { error?: string };
-        if (!response.ok) throw new Error(result.error || "The class could not be started.");
+        const signal = await socketRequest<any>("live-class:start");
+        if (!signal.ok) {
+          setNotice("The class started, but the live update could not be sent. Students will connect when their media connection recovers.");
+        }
       }
       setEnded(false);
       setStarted(true);
@@ -1213,25 +1267,45 @@ export default function LiveClassRoom() {
     setRaisedHand(next);
   }
 
+  async function submitChatMessage(body: string) {
+    if (!info?.sessionId || !body) return;
+    if (!chatMessageIdRef.current) chatMessageIdRef.current = crypto.randomUUID();
+    setChatSending(true);
+    setChatError("");
+    try {
+      const response = await fetch(
+        `/api/collaboration/sessions/${encodeURIComponent(info.sessionId)}/chat`,
+        {
+          method: "POST",
+          credentials: "same-origin",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ clientMessageId: chatMessageIdRef.current, body }),
+        },
+      );
+      const result = await response.json() as { message?: ChatMessage; error?: string };
+      if (!response.ok || !result.message) {
+        throw new Error(result.error || "The message could not be sent.");
+      }
+      setChatMessages((previous) => mergeChatMessages(previous, [result.message!]));
+      setChatDraft("");
+      chatMessageIdRef.current = "";
+      const socket = socketRef.current;
+      if (socket?.connected) {
+        socket.emit("live-class:chat-published", { messageId: result.message.id }, (ack: { ok?: boolean }) => {
+          if (!ack?.ok) setNotice("Message saved. Other participants will see it when their connection recovers.");
+        });
+      }
+    } catch (reason) {
+      setChatError(reason instanceof Error ? reason.message : "The message could not be sent. Retry.");
+    } finally {
+      setChatSending(false);
+    }
+  }
+
   function sendChat(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const body = chatDraft.trim();
-    if (!body) return;
-    if (socketRef.current?.connected) {
-      socketRef.current.emit("live-class:chat", { body });
-    } else {
-      setChatMessages((previous) => [
-        ...previous,
-        {
-          participantId: selfProfile.id,
-          name: selfProfile.name,
-          role: isTeacher ? "teacher" : "student",
-          profilePhotoUrl: selfProfile.profilePhotoUrl,
-          body,
-        },
-      ]);
-    }
-    setChatDraft("");
+    void submitChatMessage(body);
   }
 
   function finishClass(message: string) {
@@ -1297,7 +1371,6 @@ export default function LiveClassRoom() {
 
   useEffect(() => {
     let active = true;
-    let joinTimer: number | undefined;
 
     async function join() {
       try {
@@ -1316,12 +1389,10 @@ export default function LiveClassRoom() {
             setError(reason instanceof Error ? reason.message : "Camera could not be opened.");
           }
         }
-        if (result.waitingForTeacher) {
-          setConnecting(false);
-          setNotice("Waiting for your teacher to start");
-          joinTimer = window.setTimeout(() => void join(), 3000);
-          return;
+        if (result.transport !== "mediasoup") {
+          throw new Error("This class is not configured for the mediasoup classroom service.");
         }
+        if (result.waitingForTeacher) setNotice("Waiting for your teacher to start");
 
         const socket = io({
           path: "/live-class/socket.io",
@@ -1342,7 +1413,6 @@ export default function LiveClassRoom() {
             });
           } else {
             setConnectionQuality(audioOnlyRef.current ? "slow" : "good");
-            if (!audioOnlyRef.current) setNotice("");
             scheduleVideoRecovery();
           }
         });
@@ -1397,7 +1467,12 @@ export default function LiveClassRoom() {
             }
             setParticipants(rejoin.participants);
             setAttendees(rejoin.attendees || []);
-            setStarted(rejoin.started);
+            setChatMessages((previous) =>
+              mergeChatMessages(previous, rejoin.chatMessages || []));
+            setStarted((previous) => previous || Boolean(rejoin.started));
+            const ownParticipant = rejoin.participants.find((item: ParticipantState) =>
+              item.id === rejoin.participantId);
+            setMicAllowed(rejoin.role !== "student" || Boolean(ownParticipant?.micAllowed));
             for (const producer of rejoin.producers || []) {
               void consumeProducer(producer).catch((reason) => {
                 setError(reason instanceof Error ? reason.message : "Remote media could not be restored.");
@@ -1450,9 +1525,14 @@ export default function LiveClassRoom() {
         socket.on("live-class:microphone", (payload: { allowed: boolean; message: string }) => {
           setMicAllowed(payload.allowed);
           setNotice(payload.message);
+          if (!payload.allowed) {
+            microphoneWantedRef.current = false;
+            microphoneStreamRef.current?.getAudioTracks().forEach((track) => track.enabled = false);
+            setMicOn(false);
+          }
         });
         socket.on("live-class:chat", (payload: ChatMessage) => {
-          setChatMessages((previous) => [...previous, payload]);
+          setChatMessages((previous) => mergeChatMessages(previous, [payload]));
         });
         socket.on("live-class:new-producer", (producer: MediaProducer) => {
           void consumeProducer(producer).catch((reason) => {
@@ -1478,6 +1558,8 @@ export default function LiveClassRoom() {
         consumePendingProducers();
         setParticipants(ack.participants);
         setAttendees(ack.attendees || []);
+        setChatMessages((previous) =>
+          mergeChatMessages(previous, ack.chatMessages || []));
         for (const producer of ack.producers || []) {
           void consumeProducer(producer).catch((reason) => {
             setError(reason instanceof Error ? reason.message : "Remote media could not be received.");
@@ -1491,7 +1573,8 @@ export default function LiveClassRoom() {
           role: ack.role,
           profilePhotoUrl: ownParticipant?.profilePhotoUrl || "",
         });
-        setStarted(ack.started);
+        setMicAllowed(ack.role !== "student" || Boolean(ownParticipant?.micAllowed));
+        setStarted((previous) => previous || Boolean(ack.started));
         setConnecting(false);
         if (audioOnlyRef.current) emitVideoMode(false);
         try {
@@ -1513,7 +1596,7 @@ export default function LiveClassRoom() {
             setError(reason instanceof Error ? reason.message : "The connection is unstable.");
           });
         } else {
-          setNotice("");
+          setNotice(ack.started ? "" : "Waiting for your teacher to start");
           scheduleVideoRecovery();
         }
       } catch (reason) {
@@ -1527,7 +1610,6 @@ export default function LiveClassRoom() {
     void join();
     return () => {
       active = false;
-      if (joinTimer) window.clearTimeout(joinTimer);
       cameraStreamRef.current?.getTracks().forEach((track) => track.stop());
       screenStreamRef.current?.getTracks().forEach((track) => track.stop());
       socketRef.current?.disconnect();
@@ -1777,18 +1859,29 @@ export default function LiveClassRoom() {
           </section>
           <section className="livekit-chat" aria-label="Class chat">
             <header><h2>Class chat</h2></header>
-            <div className="livekit-chat-messages" role="log" aria-live="polite">
+            <div className="livekit-chat-messages" ref={chatMessagesRef} role="log" aria-live="polite">
               {chatMessages.length === 0 && <p className="livekit-chat-empty">No messages yet.</p>}
-              {chatMessages.map((message, index) => (
-                <article className="livekit-chat-message" key={`${message.name}-${index}`}>
+              {chatMessages.map((message) => (
+                <article
+                  className={`livekit-chat-message${message.senderId === selfProfile.id ? " is-mine" : ""}`}
+                  key={message.id}
+                >
                   <div className="livekit-chat-person">
                     <ProfileAvatar
                       className="livekit-chat-avatar"
                       name={message.name}
                       photoUrl={message.profilePhotoUrl}
-                      seed={message.participantId || message.name}
+                      seed={message.senderId}
                     />
-                    <div><strong>{message.name}</strong>{message.role === "teacher" && <small>Teacher</small>}</div>
+                    <div>
+                      <strong>{message.name}</strong>
+                      {message.role === "teacher" && <small className="livekit-chat-tutor-badge">Tutor</small>}
+                      {message.email && <small>{message.email}</small>}
+                      <time dateTime={message.createdAt}>
+                        {new Intl.DateTimeFormat(undefined, { dateStyle: "short", timeStyle: "short" })
+                          .format(new Date(message.createdAt))}
+                      </time>
+                    </div>
                   </div>
                   <p>{message.body}</p>
                 </article>
@@ -1796,9 +1889,17 @@ export default function LiveClassRoom() {
             </div>
             <form className="livekit-chat-form" onSubmit={sendChat}>
               <input value={chatDraft} onChange={(event) => setChatDraft(event.target.value)}
-                placeholder="Write a message…" maxLength={500} />
-              <button className="button button-dark" type="submit" disabled={!chatDraft.trim()}>Send</button>
+                placeholder="Write a message…" maxLength={2000} />
+              <button className="button button-dark" type="submit" disabled={!chatDraft.trim() || chatSending}>
+                {chatSending ? "Sending…" : "Send"}
+              </button>
             </form>
+            {chatError && <p className="livekit-chat-error" role="alert">
+              {chatError}{" "}
+              <button className="livekit-chat-retry" type="button" onClick={() => void submitChatMessage(chatDraft.trim())}>
+                Retry
+              </button>
+            </p>}
           </section>
         </aside>
       </div>}

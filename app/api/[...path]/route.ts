@@ -1139,7 +1139,7 @@ async function getAdminOverview(): Promise<Response> {
         occurredAt: activity.occurred_at,
       })),
       integrations: {
-        mediasoup: { configured: true },
+        mediasoup: { configured: process.env.MEDIASOUP_SFU_READY === "true" },
       },
     });
   } catch (error) {

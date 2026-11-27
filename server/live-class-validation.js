@@ -29,9 +29,17 @@ export function getLiveClassConfig(env = process.env) {
   const maxPort = Number(env.MEDIASOUP_MAX_PORT || 49999);
   const maxStudents = Number(env.LIVE_CLASS_MAX_STUDENTS || 16);
   const partMinutes = Number(env.RECORDING_PART_MINUTES || 15);
+  const announcedIp = env.MEDIASOUP_ANNOUNCED_IP || "";
+  const turnValues = [env.TURN_URL, env.TURN_USERNAME, env.TURN_CREDENTIAL];
   if (!Number.isInteger(minPort) || !Number.isInteger(maxPort) ||
       minPort < 1 || maxPort > 65535 || minPort >= maxPort) {
     throw new Error("Set a valid MEDIASOUP_MIN_PORT and MEDIASOUP_MAX_PORT range.");
+  }
+  if (env.NODE_ENV === "production" && !announcedIp) {
+    throw new Error("Set MEDIASOUP_ANNOUNCED_IP to the server's public IP address in production.");
+  }
+  if (turnValues.some(Boolean) && !turnValues.every(Boolean)) {
+    throw new Error("Set TURN_URL, TURN_USERNAME, and TURN_CREDENTIAL together.");
   }
   if (!Number.isInteger(maxStudents) || maxStudents < 1 || maxStudents > 16) {
     throw new Error("LIVE_CLASS_MAX_STUDENTS must be between 1 and 16 for this mediasoup server.");
@@ -41,16 +49,16 @@ export function getLiveClassConfig(env = process.env) {
   }
   return {
     listenIp: env.MEDIASOUP_LISTEN_IP || "0.0.0.0",
-    announcedIp: env.MEDIASOUP_ANNOUNCED_IP || "",
+    announcedIp,
     minPort,
     maxPort,
     maxStudents,
     partMinutes,
     iceServers: [
-      ...(env.STUN_URL ? [{ urls: env.STUN_URL }] : []),
       ...(env.TURN_URL && env.TURN_USERNAME && env.TURN_CREDENTIAL
         ? [{ urls: env.TURN_URL, username: env.TURN_USERNAME, credential: env.TURN_CREDENTIAL }]
         : []),
+      { urls: env.STUN_URL || "stun:stun.l.google.com:19302" },
     ],
   };
 }
