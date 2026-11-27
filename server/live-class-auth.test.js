@@ -1,9 +1,16 @@
 import assert from "node:assert/strict";
 import { createHmac } from "node:crypto";
 import test from "node:test";
-import { authenticateLiveClassCookie, readLiveClassSession } from "./live-class-auth.js";
+import {
+  authenticateLiveClassCookie,
+  authenticateLiveClassUser,
+  createLiveClassSocketTicket,
+  readLiveClassSession,
+  readLiveClassSocketTicket,
+} from "./live-class-auth.js";
 
 const userId = "10e2151e-5547-4e31-b86f-d06dd5f6b6f9";
+const sessionId = "a22fcac5-5c53-4b9d-9f8c-85010de2ac8f";
 
 function signedCookie(session, secret = "test-session-secret") {
   const payload = Buffer.from(JSON.stringify(session)).toString("base64url");
@@ -52,4 +59,33 @@ test("loads only active, approved-to-sign-in accounts from the existing user tab
     { secret: "test-session-secret" },
   );
   assert.equal(user.role, "learner");
+});
+
+test("issues short-lived socket tickets scoped to one user and class", () => {
+  const now = 1_700_000_000_000;
+  const secret = "test-session-secret";
+  const ticket = createLiveClassSocketTicket({ userId, sessionId, secret, now });
+
+  assert.deepEqual(readLiveClassSocketTicket(ticket, { secret, sessionId, now }), { userId, sessionId });
+  assert.equal(readLiveClassSocketTicket(ticket, { secret: "wrong-secret", sessionId, now }), null);
+  assert.equal(readLiveClassSocketTicket(`${ticket}x`, { secret, sessionId, now }), null);
+  assert.equal(readLiveClassSocketTicket(ticket.replace(".", "!."), { secret, sessionId, now }), null);
+  assert.equal(readLiveClassSocketTicket(ticket, {
+    secret,
+    sessionId: "b22fcac5-5c53-4b9d-9f8c-85010de2ac8f",
+    now,
+  }), null);
+  assert.equal(readLiveClassSocketTicket(ticket, { secret, sessionId, now: now + 121_000 }), null);
+  assert.throws(() => createLiveClassSocketTicket({ userId, sessionId, secret: "" }), /SESSION_SECRET/);
+});
+
+test("rechecks the ticket user against the active account table", async () => {
+  const pool = {
+    query: async (_sql, params) => {
+      assert.deepEqual(params, [userId]);
+      return { rows: [{ id: userId, role: "teacher" }] };
+    },
+  };
+  assert.equal((await authenticateLiveClassUser(userId, pool)).role, "teacher");
+  assert.equal(await authenticateLiveClassUser("not-a-user-id", pool), null);
 });

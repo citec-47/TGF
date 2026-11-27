@@ -34,6 +34,7 @@ interface JoinResponse {
   programmeTitle: string;
   teacherName: string;
   teacherId: string;
+  socketTicket: string;
   started?: boolean;
   startsAt?: string;
   waitingForTeacher?: boolean;
@@ -1394,8 +1395,33 @@ export default function LiveClassRoom() {
         }
         if (result.waitingForTeacher) setNotice("Waiting for your teacher to start");
 
-        const socket = io({
+        let nextSocketTicket = result.socketTicket;
+        const socket = io(process.env.NEXT_PUBLIC_LIVE_CLASS_SFU_URL?.trim() || undefined, {
           path: "/live-class/socket.io",
+          auth: (callback) => {
+            if (nextSocketTicket) {
+              const socketTicket = nextSocketTicket;
+              nextSocketTicket = "";
+              callback({ socketTicket });
+              return;
+            }
+            void requestLiveJoin(joinUrl, liveSessionId ? {} : { classDate })
+              .then((refreshed) => {
+                if (!active) {
+                  callback({ socketTicket: "" });
+                  return;
+                }
+                callback({ socketTicket: refreshed.socketTicket });
+              })
+              .catch((reason) => {
+                if (active) {
+                  setError(reason instanceof Error
+                    ? `Could not refresh live-class authorization: ${reason.message}`
+                    : "Could not refresh live-class authorization. Rejoin the class.");
+                }
+                callback({ socketTicket: "" });
+              });
+          },
           transports: ["websocket", "polling"],
           reconnection: true,
           reconnectionAttempts: Infinity,

@@ -42,12 +42,14 @@ test("validates UUIDs and the configured class, TURN, and recording limits", () 
     TURN_URL: "turn:turn.example.test:3478",
     TURN_USERNAME: "student",
     TURN_CREDENTIAL: "credential",
+    LIVE_CLASS_WEB_ORIGINS: "https://www.example.test, https://portal.example.test",
   });
   assert.equal(config.maxStudents, 16);
   assert.equal(config.iceServers[0].urls, "turn:turn.example.test:3478");
   assert.equal(config.iceServers[0].username, "student");
   assert.equal(config.iceServers[0].credential, "credential");
   assert.equal(config.iceServers[1].urls, "stun:stun.l.google.com:19302");
+  assert.deepEqual(config.webOrigins, ["https://www.example.test", "https://portal.example.test"]);
   assert.throws(() => getLiveClassConfig({ LIVE_CLASS_MAX_STUDENTS: "17" }), /between 1 and 16/);
   assert.throws(() => getLiveClassConfig({ RECORDING_PART_MINUTES: "0" }), /RECORDING_PART_MINUTES/);
   assert.throws(() => getLiveClassConfig({
@@ -57,6 +59,9 @@ test("validates UUIDs and the configured class, TURN, and recording limits", () 
     NODE_ENV: "production",
     MEDIASOUP_ANNOUNCED_IP: "",
   }), /MEDIASOUP_ANNOUNCED_IP/);
+  assert.throws(() => getLiveClassConfig({
+    LIVE_CLASS_WEB_ORIGINS: "https://www.example.test/path",
+  }), /without paths/);
 });
 
 test("provides a default STUN server when no TURN service is configured", () => {
@@ -64,4 +69,5 @@ test("provides a default STUN server when no TURN service is configured", () => 
   assert.deepEqual(config.iceServers, [
     { urls: "stun:stun.l.google.com:19302" },
   ]);
+  assert.deepEqual(config.webOrigins, []);
 });

@@ -172,6 +172,8 @@ The `.vercel` project metadata does not establish that the production host
 supports a persistent Node process or mediasoup's RTP port range. Confirm the
 deployment host, firewall, public announced IP, and TURN reachability before
 releasing live classes; a static/serverless deployment cannot host this SFU.
+If the website is hosted on Vercel, use the separate SFU deployment procedure
+in [docs/LIVE_CLASS_SFU_DEPLOYMENT.md](./docs/LIVE_CLASS_SFU_DEPLOYMENT.md).
 
 ### Manual live-class verification
 

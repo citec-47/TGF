@@ -36,6 +36,7 @@ import {
   isLiveClassChatMessageId,
   normalizeLiveClassChatBody,
 } from "./live-session-chat.js";
+import { createLiveClassSocketTicket } from "./live-class-auth.js";
 
 interface CollaborationAccount {
   id: string;
@@ -172,7 +173,13 @@ async function readLiveClassChatMessages(
 ): Promise<Record<string, unknown>[]> {
   const result = await services.pool.query<LiveClassChatMessageRow>(
     `SELECT message.id, message.sender_user_id, message.body, message.created_at,
-            sender.full_name, sender.email, sender.profile_photo_url, sender.role
+            sender.full_name, sender.email,
+            COALESCE(
+              NULLIF(to_jsonb(sender)->>'profile_photo_url', ''),
+              NULLIF(to_jsonb(sender)->>'teacher_profile_photo_url', ''),
+              ''
+            ) AS profile_photo_url,
+            sender.role
      FROM tgf_live_session_chat_messages message
      JOIN tgf_users sender ON sender.id = message.sender_user_id
      WHERE message.session_id = $1 AND ($2::uuid IS NULL OR message.id = $2)
@@ -1677,6 +1684,11 @@ async function joinScheduledSession(
   }
   return services.jsonResponse(200, {
     transport: "mediasoup",
+    socketTicket: createLiveClassSocketTicket({
+      userId: account.id,
+      sessionId: session.id,
+      secret: process.env.SESSION_SECRET || "",
+    }),
     role: authorization.role,
     waitingForTeacher: authorization.role === "learner" && !session.started_at,
     recordingAvailable: session.recording_status === "recording",
@@ -2128,6 +2140,11 @@ async function joinInstantSession(
   }
   return services.jsonResponse(200, {
     transport: "mediasoup",
+    socketTicket: createLiveClassSocketTicket({
+      userId: account.id,
+      sessionId,
+      secret: process.env.SESSION_SECRET || "",
+    }),
     role: authorization.role,
     microphoneAllowed: authorization.role !== "learner" || session.microphone_allowed,
     waitingForTeacher: authorization.role === "learner" && !session.started_at,

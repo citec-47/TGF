@@ -1,6 +1,9 @@
 import { Server as SocketIOServer } from "socket.io";
 import * as mediasoup from "mediasoup";
-import { authenticateLiveClassCookie } from "./live-class-auth.js";
+import {
+  authenticateLiveClassUser,
+  readLiveClassSocketTicket,
+} from "./live-class-auth.js";
 import { getLiveClassConfig, isLiveClassUuid } from "./live-class-validation.js";
 import {
   listLiveSessionAttendees,
@@ -34,6 +37,7 @@ function uniqueParticipants(room) {
 
 export async function createLiveClassSfu(httpServer, pool) {
   const config = getLiveClassConfig();
+  const allowedOrigins = new Set(config.webOrigins);
   const workerCount = Math.max(1, Math.min(2, (globalThis.navigator?.hardwareConcurrency || 2)));
   const workers = [];
   for (let index = 0; index < workerCount; index += 1) {
@@ -51,8 +55,49 @@ export async function createLiveClassSfu(httpServer, pool) {
 
   const io = new SocketIOServer(httpServer, {
     path: "/live-class/socket.io",
-    cors: false,
+    cors: {
+      origin: config.webOrigins,
+      methods: ["GET", "POST"],
+      credentials: false,
+    },
+    allowRequest(request, callback) {
+      const origin = request.headers.origin;
+      if (!origin || allowedOrigins.has(origin)) {
+        callback(null, true);
+        return;
+      }
+
+      try {
+        const requestHost = (request.headers["x-forwarded-host"] || request.headers.host || "")
+          .split(",")[0]
+          .trim();
+        const forwardedProtocol = (request.headers["x-forwarded-proto"] || "")
+          .split(",")[0]
+          .trim();
+        const protocol = forwardedProtocol
+          ? `${forwardedProtocol}:`
+          : request.socket.encrypted ? "https:" : "http:";
+        const originUrl = new URL(origin);
+        const sameOrigin = originUrl.host === requestHost && originUrl.protocol === protocol;
+        callback(sameOrigin ? null : "Live-class origin is not allowed.", sameOrigin);
+      } catch {
+        callback("Live-class origin is not allowed.", false);
+      }
+    },
     transports: ["websocket", "polling"],
+  });
+
+  io.use((socket, next) => {
+    const ticket = readLiveClassSocketTicket(
+      socket.handshake.auth?.socketTicket,
+      { secret: process.env.SESSION_SECRET || "" },
+    );
+    if (!ticket) {
+      next(new Error("Live-class authorization ticket is invalid or expired. Rejoin the class."));
+      return;
+    }
+    socket.data.liveClassTicket = ticket;
+    next();
   });
 
   async function getSessionRow(sessionId) {
@@ -75,7 +120,13 @@ export async function createLiveClassSfu(httpServer, pool) {
   async function getChatMessages(sessionId, viewer) {
     const result = await pool.query(
       `SELECT message.id, message.sender_user_id, message.body, message.created_at,
-              sender.full_name, sender.email, sender.profile_photo_url, sender.role
+              sender.full_name, sender.email,
+              COALESCE(
+                NULLIF(to_jsonb(sender)->>'profile_photo_url', ''),
+                NULLIF(to_jsonb(sender)->>'teacher_profile_photo_url', ''),
+                ''
+              ) AS profile_photo_url,
+              sender.role
        FROM tgf_live_session_chat_messages message
        JOIN tgf_users sender ON sender.id = message.sender_user_id
        WHERE message.session_id = $1
@@ -97,11 +148,11 @@ export async function createLiveClassSfu(httpServer, pool) {
   }
 
   async function authorize(socket, sessionId) {
-    const user = await authenticateLiveClassCookie(
-      socket.handshake.headers.cookie,
-      pool,
-      { secret: process.env.SESSION_SECRET || "", production: process.env.NODE_ENV === "production" },
-    );
+    const ticket = socket.data.liveClassTicket;
+    if (!ticket || ticket.sessionId !== sessionId) {
+      throw new Error("This live-class authorization ticket is for a different class. Rejoin the class.");
+    }
+    const user = await authenticateLiveClassUser(ticket.userId, pool);
     if (!user) throw new Error("Sign in to join this live class.");
     const session = await getSessionRow(sessionId);
     if (!session) throw new Error("This live class was not found.");
@@ -463,7 +514,13 @@ export async function createLiveClassSfu(httpServer, pool) {
         if (!isLiveClassUuid(payload?.messageId)) throw new Error("The chat message ID is invalid.");
         const result = await pool.query(
           `SELECT message.id, message.sender_user_id, message.body, message.created_at,
-                  sender.full_name, sender.email, sender.profile_photo_url, sender.role
+                  sender.full_name, sender.email,
+                  COALESCE(
+                    NULLIF(to_jsonb(sender)->>'profile_photo_url', ''),
+                    NULLIF(to_jsonb(sender)->>'teacher_profile_photo_url', ''),
+                    ''
+                  ) AS profile_photo_url,
+                  sender.role
            FROM tgf_live_session_chat_messages message
            JOIN tgf_users sender ON sender.id = message.sender_user_id
            WHERE message.id = $1 AND message.session_id = $2`,
@@ -645,5 +702,10 @@ export async function createLiveClassSfu(httpServer, pool) {
     });
   });
 
-  return io;
+  return {
+    close: async () => {
+      await new Promise((resolve) => io.close(resolve));
+      for (const worker of workers) worker.close();
+    },
+  };
 }

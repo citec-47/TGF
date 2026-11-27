@@ -1,6 +1,71 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
 
 const USER_ID_PATTERN = /^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i;
+const LIVE_CLASS_SOCKET_TICKET_TTL_SECONDS = 120;
+
+function isLiveClassIdentity(value) {
+  return value === "super-admin" || USER_ID_PATTERN.test(value || "");
+}
+
+export function createLiveClassSocketTicket({ userId, sessionId, secret, now = Date.now() }) {
+  if (!secret) throw new Error("SESSION_SECRET is required to issue live-class socket tickets.");
+  if (!isLiveClassIdentity(userId) || !USER_ID_PATTERN.test(sessionId || "")) {
+    throw new Error("A valid user and live-class session are required for a socket ticket.");
+  }
+
+  const issuedAt = Math.floor(now / 1000);
+  const payload = Buffer.from(JSON.stringify({
+    purpose: "live-class-socket",
+    userId,
+    sessionId,
+    issuedAt,
+    expiresAt: issuedAt + LIVE_CLASS_SOCKET_TICKET_TTL_SECONDS,
+  })).toString("base64url");
+  const signature = createHmac("sha256", secret).update(payload).digest("base64url");
+  return `${payload}.${signature}`;
+}
+
+export function readLiveClassSocketTicket(token, {
+  secret,
+  sessionId,
+  now = Date.now(),
+} = {}) {
+  if (!secret || typeof token !== "string" || token.length > 2048) return null;
+  const [payload, signature, ...rest] = token.split(".");
+  if (!payload || !signature || rest.length ||
+      !/^[A-Za-z0-9_-]+$/.test(payload) ||
+      !/^[A-Za-z0-9_-]+$/.test(signature)) {
+    return null;
+  }
+
+  const expected = createHmac("sha256", secret).update(payload).digest();
+  let received;
+  try {
+    received = Buffer.from(signature, "base64url");
+  } catch {
+    return null;
+  }
+  if (expected.length !== received.length || !timingSafeEqual(expected, received)) return null;
+
+  try {
+    const ticket = JSON.parse(Buffer.from(payload, "base64url").toString("utf8"));
+    const nowSeconds = Math.floor(now / 1000);
+    if (ticket.purpose !== "live-class-socket" ||
+        !isLiveClassIdentity(ticket.userId) ||
+        !USER_ID_PATTERN.test(ticket.sessionId || "") ||
+        !Number.isInteger(ticket.issuedAt) ||
+        !Number.isInteger(ticket.expiresAt) ||
+        ticket.issuedAt > nowSeconds + 30 ||
+        ticket.expiresAt <= nowSeconds ||
+        ticket.expiresAt - ticket.issuedAt > LIVE_CLASS_SOCKET_TICKET_TTL_SECONDS ||
+        (sessionId && ticket.sessionId !== sessionId)) {
+      return null;
+    }
+    return { userId: ticket.userId, sessionId: ticket.sessionId };
+  } catch {
+    return null;
+  }
+}
 
 export function readLiveClassSession(cookieHeader, {
   secret,
@@ -39,14 +104,19 @@ export function readLiveClassSession(cookieHeader, {
 export async function authenticateLiveClassCookie(cookieHeader, pool, options = {}) {
   const session = readLiveClassSession(cookieHeader, options);
   if (!session) return null;
-  if (session.userId === "super-admin") {
+  return authenticateLiveClassUser(session.userId, pool);
+}
+
+export async function authenticateLiveClassUser(userId, pool) {
+  if (userId === "super-admin") {
     return {
-      id: session.userId,
+      id: userId,
       full_name: "TGF Group Main Administrator",
       email: "",
       role: "administrator",
     };
   }
+  if (!USER_ID_PATTERN.test(userId || "")) return null;
 
   const result = await pool.query(
     `SELECT id, full_name, email, role,
@@ -58,7 +128,7 @@ export async function authenticateLiveClassCookie(cookieHeader, pool, options = 
      FROM tgf_users
      WHERE id = $1 AND account_status = 'active'
        AND is_frozen = FALSE AND must_change_password = FALSE`,
-    [session.userId],
+    [userId],
   );
   return result.rows[0] || null;
 }

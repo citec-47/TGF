@@ -30,6 +30,10 @@ export function getLiveClassConfig(env = process.env) {
   const maxStudents = Number(env.LIVE_CLASS_MAX_STUDENTS || 16);
   const partMinutes = Number(env.RECORDING_PART_MINUTES || 15);
   const announcedIp = env.MEDIASOUP_ANNOUNCED_IP || "";
+  const webOrigins = (env.LIVE_CLASS_WEB_ORIGINS || "")
+    .split(",")
+    .map((origin) => origin.trim())
+    .filter(Boolean);
   const turnValues = [env.TURN_URL, env.TURN_USERNAME, env.TURN_CREDENTIAL];
   if (!Number.isInteger(minPort) || !Number.isInteger(maxPort) ||
       minPort < 1 || maxPort > 65535 || minPort >= maxPort) {
@@ -47,6 +51,17 @@ export function getLiveClassConfig(env = process.env) {
   if (!Number.isInteger(partMinutes) || partMinutes < 1 || partMinutes > 60) {
     throw new Error("RECORDING_PART_MINUTES must be between 1 and 60.");
   }
+  for (const origin of webOrigins) {
+    let parsedOrigin;
+    try {
+      parsedOrigin = new URL(origin);
+    } catch {
+      throw new Error("LIVE_CLASS_WEB_ORIGINS must contain comma-separated HTTP or HTTPS origins.");
+    }
+    if (!["http:", "https:"].includes(parsedOrigin.protocol) || parsedOrigin.origin !== origin) {
+      throw new Error("LIVE_CLASS_WEB_ORIGINS must contain comma-separated HTTP or HTTPS origins without paths.");
+    }
+  }
   return {
     listenIp: env.MEDIASOUP_LISTEN_IP || "0.0.0.0",
     announcedIp,
@@ -54,6 +69,7 @@ export function getLiveClassConfig(env = process.env) {
     maxPort,
     maxStudents,
     partMinutes,
+    webOrigins,
     iceServers: [
       ...(env.TURN_URL && env.TURN_USERNAME && env.TURN_CREDENTIAL
         ? [{ urls: env.TURN_URL, username: env.TURN_USERNAME, credential: env.TURN_CREDENTIAL }]
