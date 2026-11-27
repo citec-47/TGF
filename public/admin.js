@@ -121,8 +121,8 @@ const rejectAccountMessage = document.querySelector("#reject-account-message");
 const overviewMessage = document.querySelector("#overview-message");
 const overviewTasks = document.querySelector("#overview-tasks");
 const overviewActivity = document.querySelector("#overview-activity");
-const jitsiStatus = document.querySelector("#overview-jitsi-status");
-const jitsiDetails = document.querySelector("#overview-jitsi-details");
+const recordingStatus = document.querySelector("#overview-recording-status");
+const recordingDetails = document.querySelector("#overview-recording-details");
 const overviewStats = {
   students: document.querySelector("#overview-student-count"),
   pendingAccounts: document.querySelector("#overview-pending-account-count"),
@@ -277,12 +277,12 @@ function renderAdminOverview(overview) {
   for (const [key, element] of Object.entries(overviewStats)) {
     element.textContent = String(overview.stats[key]);
   }
-  const jitsiConfigured = overview.integrations?.jitsi?.configured === true;
-  jitsiStatus.textContent = jitsiConfigured ? "Configured" : "Needs setup";
-  jitsiStatus.className = `admin-integration-status ${jitsiConfigured ? "is-configured" : "is-missing"}`;
-  jitsiDetails.textContent = jitsiConfigured
-    ? "Jitsi JaaS credentials are configured for live classes."
-    : "Set JITSI_DOMAIN, JITSI_APP_ID, JITSI_KID, and JITSI_PRIVATE_KEY on the server.";
+  const recordingConfigured = overview.integrations?.browserRecording?.configured === true;
+  recordingStatus.textContent = recordingConfigured ? "Configured" : "Needs setup";
+  recordingStatus.className = `admin-integration-status ${recordingConfigured ? "is-configured" : "is-missing"}`;
+  recordingDetails.textContent = recordingConfigured
+    ? "Tutor browser recordings can be uploaded to Cloudinary."
+    : "Set CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY, and CLOUDINARY_API_SECRET on the server.";
 
   const pendingPayments = overview.tasks.pendingPayments;
   paymentNavCount.textContent = String(pendingPayments);
@@ -383,9 +383,9 @@ async function loadAdminOverview() {
   } catch (error) {
     if (requestId !== adminOverviewRequest) return;
     for (const element of Object.values(overviewStats)) element.textContent = "—";
-    jitsiStatus.textContent = "Status unavailable";
-    jitsiStatus.className = "admin-integration-status";
-    jitsiDetails.textContent = "The Jitsi configuration status could not be loaded.";
+    recordingStatus.textContent = "Status unavailable";
+    recordingStatus.className = "admin-integration-status";
+    recordingDetails.textContent = "The browser-recording configuration status could not be loaded.";
     overviewTasks.replaceChildren(makeTag("p", "admin-empty", "Overview data is unavailable."));
     overviewActivity.replaceChildren(makeTag("p", "admin-empty", "Recent activity is unavailable."));
     setMessage(overviewMessage, error.message, true);

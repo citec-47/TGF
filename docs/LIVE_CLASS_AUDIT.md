@@ -1,5 +1,9 @@
 # Live-Class Architecture Audit
 
+> Historical audit: the active Jitsi implementation described below has since
+> been replaced by browser-only recording. See `LIVE_CLASS_SETUP.md` for current
+> classroom behavior and configuration.
+
 ## Tech stack
 
 - Next.js 16, React 19, TypeScript 7, Node 20+

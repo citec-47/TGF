@@ -6898,25 +6898,13 @@
   background: #151714;
 }
 
-.livekit-jitsi-frame {
+.livekit-preview-video {
   position: absolute;
   inset: 0;
   width: 100%;
   height: 100%;
-}
-
-.livekit-jitsi-frame iframe {
-  display: block;
-  width: 100%;
-  height: 100%;
-  border: 0;
-}
-
-.livekit-main-video {
-  width: 100%;
-  height: 100%;
   min-height: 520px;
-  object-fit: contain;
+  object-fit: cover;
   background: #151714;
 }
 
@@ -6927,9 +6915,125 @@
   place-items: center;
   color: #fff;
   font-size: 1.1rem;
+  text-align: center;
+  padding: 24px;
   background:
     radial-gradient(circle at 50% 45%, rgb(210 111 53 / 22%), transparent 26%),
     #151714;
+}
+
+.livekit-main-placeholder p {
+  max-width: 42rem;
+  margin: 8px 0 0;
+  font-size: 0.95rem;
+  color: rgb(255 255 255 / 78%);
+}
+
+.livekit-recording-indicator {
+  position: absolute;
+  top: 16px;
+  left: 16px;
+  z-index: 1;
+  padding: 8px 12px;
+  border-radius: 999px;
+  color: #fff;
+  background: #b42318;
+  font-size: 0.875rem;
+  font-weight: 700;
+}
+
+.livekit-recording-controls,
+.livekit-recording-instructions,
+.livekit-recording-recovery {
+  position: absolute;
+  z-index: 1;
+  left: 16px;
+  bottom: 16px;
+  color: #fff;
+}
+
+.livekit-recording-controls progress,
+.livekit-recording-upload-progress progress {
+  display: block;
+  width: min(320px, 72vw);
+  height: 12px;
+  accent-color: #d26f35;
+}
+
+.livekit-recording-upload-progress p {
+  margin: 0 0 8px;
+}
+
+.livekit-recording-instructions {
+  bottom: 76px;
+}
+
+.livekit-recording-instructions {
+  right: 16px;
+  max-width: 42rem;
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: rgb(0 0 0 / 65%);
+  font-size: 0.875rem;
+}
+
+.livekit-recording-setup {
+  margin: 14px 0;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  color: var(--muted);
+}
+
+.livekit-recording-recovery {
+  position: static;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-top: 16px;
+  padding: 16px;
+  color: inherit;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+}
+
+.livekit-room .livekit-preview-video {
+  min-height: 0;
+  border-radius: inherit;
+}
+
+@media (max-width: 760px) {
+  .livekit-room .livekit-main-view {
+    min-height: min(56vh, 500px);
+  }
+
+  .livekit-room .livekit-recording-controls {
+    left: 10px;
+    bottom: 10px;
+  }
+
+  .livekit-room .livekit-recording-instructions {
+    right: 10px;
+    bottom: 68px;
+    left: 10px;
+    max-width: none;
+  }
+
+  .livekit-room .livekit-recording-indicator {
+    top: 10px;
+    left: 10px;
+  }
+
+  .livekit-recording-setup {
+    font-size: 0.9rem;
+  }
+
+  .livekit-room .livekit-recording-recovery {
+    align-items: flex-start;
+    flex-direction: column;
+  }
 }
 
 .livekit-student-row {

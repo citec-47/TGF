@@ -1,30 +1,16 @@
-# Live Class Setup
+# Browser Recording Setup
 
-## Jitsi JaaS
-
-1. Create or sign in to an 8x8 JaaS account at https://jaas.8x8.vc/.
-2. Create an application and copy its App ID.
-3. Create an API key and copy the Key ID (JITSI_KID).
-4. Download the RSA private key associated with the API key.
-5. Set these server variables:
-
-```text
-JITSI_DOMAIN=8x8.vc
-JITSI_APP_ID=<your-app-id>
-JITSI_KID=<your-key-id>
-JITSI_PRIVATE_KEY=<PEM private key>
-```
-
-JaaS rooms use the stored random room name and the app ID as their iframe room
-scope. JWTs are signed on the server with RS256 and expire after 15 minutes.
-Never expose JITSI_PRIVATE_KEY through NEXT_PUBLIC_* variables or source files.
+Live classes use the existing class status, attendance, and chat features. They
+do not provide a remote audio/video meeting. The tutor's browser records the
+selected tab or screen and microphone, stores chunks locally in IndexedDB, and
+uploads the finished recording directly to Cloudinary. No Jitsi, SFU, or
+signaling service is used.
 
 ## Cloudinary
 
-1. Create a Cloudinary account.
-2. Open the account dashboard and copy Cloud Name and API Key.
-3. Generate or copy the API Secret.
-4. Set these server variables:
+1. Create a Cloudinary account at https://cloudinary.com/users/register_free.
+2. From the Cloudinary Console, copy the Cloud Name and API Key.
+3. Keep the API Secret private; set all three values on the server:
 
 ```text
 CLOUDINARY_CLOUD_NAME=<cloud-name>
@@ -32,9 +18,10 @@ CLOUDINARY_API_KEY=<api-key>
 CLOUDINARY_API_SECRET=<api-secret>
 ```
 
-The API Secret remains server-only. Existing browser recording code should
-request server signatures before direct upload; do not place the secret in a
-browser bundle.
+The class page requests a short-lived signed upload authorization from the
+server. The API Secret is never sent to the browser. Chunked uploads use 6 MiB
+chunks and retry transient failures; recordings remain in IndexedDB for retry
+if upload or completion fails.
 
 ## Local run
 
@@ -44,29 +31,27 @@ npm run db:migrate
 npm run dev
 ```
 
-Open the site through HTTPS for camera and microphone testing. localhost is
-normally treated as a secure browser context.
+Sign in as the class tutor, open a scheduled class, and select **Start class &
+record**. In the browser picker, select **This tab** and enable **Share tab
+audio**. Microphone permission is requested once. If microphone access is
+denied, the screen/tab recording can continue with an explicit warning. End the
+class to upload and save the recording. Keep the page open until upload finishes.
 
-Set `LIVE_CLASS_DEBUG=true` only while diagnosing join or Jitsi events.
-Set it to `false` in normal operation.
+Use current Chrome or Edge over HTTPS; localhost is normally treated as a
+secure context. `getDisplayMedia` and tab-audio capture are not supported in
+every browser. Recording relies on the tutor's device, browser, and connection.
+Closing the tab while recording triggers a browser warning; chunks already
+saved to IndexedDB can be uploaded when the tutor reopens that class page.
 
-## Vercel and production
+Set `NEXT_PUBLIC_LIVE_CLASS_DEBUG=true` only while diagnosing class and browser
+recording events. Set it to `false` in normal operation.
 
-Set JITSI_* and Cloudinary server variables in the Vercel project environment
-settings for Production and Preview as needed, then redeploy. The Jitsi
-External API script is loaded from JITSI_DOMAIN in the browser; Jitsi media
-does not require a custom Socket.IO or RTP deployment.
+## Production
 
-Database migrations must be applied with the server-side DATABASE_URL before
-live classes are opened.
+Set the three Cloudinary variables in the hosting provider's server-side
+environment settings and redeploy. Do not use `NEXT_PUBLIC_` for credentials.
+Apply database migrations with the server-side `DATABASE_URL` before opening
+live classes.
 
-## Free-tier and browser limitations
-
-- JaaS and Cloudinary provide limited free-tier monthly usage and storage.
-  Verify the current limits on https://jaas.8x8.vc/pricing and
-  https://cloudinary.com/pricing.
-- JaaS and Cloudinary free-tier limits can change. Production use requires
-  monitoring account usage and billing limits.
-- Browser tab recording depends on the tutor's browser and device.
-  Chrome or Edge is recommended. "This tab" and "Share tab audio" must be
-  selected. Tab-audio capture is not supported in every browser.
+Cloudinary free-plan storage, bandwidth, and file limits may change. Check the
+current plan details at https://cloudinary.com/pricing.

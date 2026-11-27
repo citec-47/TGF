@@ -1139,12 +1139,11 @@ async function getAdminOverview(): Promise<Response> {
         occurredAt: activity.occurred_at,
       })),
       integrations: {
-        jitsi: {
+        browserRecording: {
           configured: [
-            "JITSI_DOMAIN",
-            "JITSI_APP_ID",
-            "JITSI_KID",
-            "JITSI_PRIVATE_KEY",
+            "CLOUDINARY_CLOUD_NAME",
+            "CLOUDINARY_API_KEY",
+            "CLOUDINARY_API_SECRET",
           ].every((name) => Boolean(process.env[name]?.trim())),
         },
       },

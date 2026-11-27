@@ -102,21 +102,22 @@ page, a daily answer form for questions and activities, and the module
 capstone at the end of Week 4. Daily answers are submitted to the assigned
 teacher for approval or feedback; this review does not change module access.
 
-## Jitsi JaaS live classes
+## Browser-recorded live classes
 
-Live audio and video are provided by Jitsi JaaS through the iFrame External API.
-The app server issues short-lived RS256 join JWTs after checking class ownership
-and approved student enrollment. Room names are random UUID-based names stored
-on the live-class record. No self-hosted SFU, WebSocket media service, TURN
-RTP range, or separate SFU process is required.
+Live classes provide class status, attendance, and chat; they do not include a
+remote video-conferencing service. The tutor's browser captures a selected tab
+or screen and microphone using `getDisplayMedia` and `MediaRecorder`, saves
+chunks in IndexedDB, then uploads the recording directly to Cloudinary using a
+short-lived server signature. Cloudinary credentials remain server-only.
 
-Run `npm run db:migrate` before starting classes. Configure `JITSI_DOMAIN`,
-`JITSI_APP_ID`, `JITSI_KID`, and `JITSI_PRIVATE_KEY` on the server. The private
-key and Cloudinary API secret must remain server-only.
+Run `npm run db:migrate` before starting classes. Configure
+`CLOUDINARY_CLOUD_NAME`, `CLOUDINARY_API_KEY`, and `CLOUDINARY_API_SECRET` on the
+server. Tutors should use current Chrome or Edge over HTTPS, choose "This tab",
+and enable "Share tab audio" when prompted. Screen/tab recording depends on the
+tutor's browser, device, and connection; tab-audio capture is not supported in
+every browser. Cloudinary plan limits vary; see
+https://cloudinary.com/pricing.
 
-Set Cloudinary credentials to enable private browser recordings:
-`CLOUDINARY_CLOUD_NAME`, `CLOUDINARY_API_KEY`, and `CLOUDINARY_API_SECRET`.
-Set `LIVE_CLASS_DEBUG=true` temporarily for join and Jitsi event logs.
-
-See [docs/LIVE_CLASS_SETUP.md](./docs/LIVE_CLASS_SETUP.md) for JaaS and
-Cloudinary setup, environment variables, and local/production deployment.
+Set `NEXT_PUBLIC_LIVE_CLASS_DEBUG=true` temporarily for browser recording and
+class-status logs. See [docs/LIVE_CLASS_SETUP.md](./docs/LIVE_CLASS_SETUP.md)
+for setup and deployment.
