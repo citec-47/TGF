@@ -284,7 +284,7 @@ export default function LiveClassRoom() {
   const [recordingElapsedSeconds, setRecordingElapsedSeconds] = useState(0);
   const [recordingQueueCount, setRecordingQueueCount] = useState(0);
   const [recordingUploadStatus, setRecordingUploadStatus] = useState<"uploading" | "waiting" | "">("");
-  const [connectionQuality, setConnectionQuality] = useState<"good" | "slow" | "reconnecting">("good");
+  const [connectionQuality, setConnectionQuality] = useState<"good" | "slow" | "reconnecting" | "failed">("good");
   const [audioOnly, setAudioOnly] = useState(false);
 
   const [info, setInfo] = useState<JoinResponse | null>(null);
@@ -1375,6 +1375,34 @@ export default function LiveClassRoom() {
 
     async function join() {
       try {
+        const configuredSfuUrl = process.env.NEXT_PUBLIC_LIVE_CLASS_SFU_URL?.trim() || "";
+        let sfuOrigin: string | undefined;
+        if (configuredSfuUrl) {
+          try {
+            const url = new URL(configuredSfuUrl);
+            const secureForProduction = process.env.NODE_ENV !== "production" || url.protocol === "https:";
+            if (secureForProduction && url.pathname === "/" && !url.search && !url.hash &&
+                !url.username && !url.password) {
+              sfuOrigin = url.origin;
+            }
+          } catch {
+            sfuOrigin = undefined;
+          }
+        }
+        const sfuConfigurationError = !configuredSfuUrl && process.env.NODE_ENV === "production"
+          ? "Live classes are not configured: set NEXT_PUBLIC_LIVE_CLASS_SFU_URL to the dedicated HTTPS SFU host in Vercel, then redeploy."
+          : configuredSfuUrl && !sfuOrigin
+            ? "The live-class SFU URL must be a valid HTTPS origin in production, without a path."
+            : process.env.NODE_ENV === "production" && sfuOrigin === window.location.origin
+              ? "The live-class SFU points to the website host. Configure a separate HTTPS SFU host and redeploy."
+              : "";
+        if (sfuConfigurationError) {
+          setConnectionQuality("failed");
+          setConnecting(false);
+          setError(sfuConfigurationError);
+          return;
+        }
+
         const joinUrl = liveSessionId
           ? `/api/collaboration/live-sessions/${encodeURIComponent(liveSessionId)}/join`
           : `/api/collaboration/sessions/${encodeURIComponent(slotId)}/join`;
@@ -1396,7 +1424,7 @@ export default function LiveClassRoom() {
         if (result.waitingForTeacher) setNotice("Waiting for your teacher to start");
 
         let nextSocketTicket = result.socketTicket;
-        const socket = io(process.env.NEXT_PUBLIC_LIVE_CLASS_SFU_URL?.trim() || undefined, {
+        const socket = io(sfuOrigin, {
           path: "/live-class/socket.io",
           auth: (callback) => {
             if (nextSocketTicket) {
@@ -1753,7 +1781,11 @@ export default function LiveClassRoom() {
           </button>}
           {connected && <span className="livekit-recording-badge"><span /> Connected</span>}
           {connectionQuality !== "good" && <span className="livekit-recording-badge is-starting">
-            {connectionQuality === "slow" ? "Slow network · audio only" : "Reconnecting · audio only"}
+            {connectionQuality === "slow"
+              ? "Slow network · audio only"
+              : connectionQuality === "failed"
+                ? "Connection failed"
+                : "Reconnecting · audio only"}
           </span>}
           {recordingStatus && <span className={`livekit-recording-badge${recordingUploadStatus === "waiting" ? " is-starting" : ""}`}>
             <span /> {recordingStatus}
