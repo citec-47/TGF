@@ -47,11 +47,19 @@ interface PeerMediaResponse {
   iceServers: RTCIceServer[];
 }
 
+class MediaRequestError extends Error {
+  constructor(message: string, readonly status: number) {
+    super(message);
+    this.name = "MediaRequestError";
+  }
+}
+
 interface PeerConnectionState {
   connection: RTCPeerConnection;
   videoSender: RTCRtpSender;
   screenSender: RTCRtpSender;
   audioSender: RTCRtpSender;
+  statsTimer: number | null;
 }
 
 interface LiveMediaRoomProps {
@@ -75,7 +83,9 @@ async function requestMediaJson<T>(url: string, init?: RequestInit): Promise<T> 
   } catch {
     if (response.ok) throw new Error("The media service returned an invalid response.");
   }
-  if (!response.ok) throw new Error(result?.error || `The media request failed (${response.status}).`);
+  if (!response.ok) {
+    throw new MediaRequestError(result?.error || `The media request failed (${response.status}).`, response.status);
+  }
   if (!result) throw new Error("The media service returned an empty response.");
   return result;
 }
@@ -97,6 +107,16 @@ function describeTracks(stream: MediaStream | null) {
     muted: track.muted,
     readyState: track.readyState,
   })) || [];
+}
+
+function describeTrack(track: MediaStreamTrack | null) {
+  return track ? {
+    kind: track.kind,
+    id: track.id,
+    enabled: track.enabled,
+    muted: track.muted,
+    readyState: track.readyState,
+  } : null;
 }
 
 interface CandidatePairSummary {
@@ -318,6 +338,7 @@ function AudioView({ stream, participantName }: { stream: MediaStream; participa
 function ParticipantTile({
   participant,
   stream,
+  microphoneStatus,
   isSelf,
   isSpeaker,
   canManageMicrophone,
@@ -325,6 +346,7 @@ function ParticipantTile({
 }: {
   participant: Participant;
   stream: MediaStream | null;
+  microphoneStatus: "on" | "muted" | "connecting";
   isSelf: boolean;
   isSpeaker: boolean;
   canManageMicrophone: boolean;
@@ -345,9 +367,12 @@ function ParticipantTile({
             <ControlIcon name="camera-off" /> Camera off
           </span>
         )}
-        <span className={styles.participantMic} aria-label={participant.microphoneOn ? "Microphone enabled" : "Microphone muted"}>
-          <ControlIcon name={participant.microphoneOn ? "microphone" : "microphone-off"} />
-          {participant.microphoneOn ? "Mic on" : "Muted"}
+        <span
+          className={styles.participantMic}
+          aria-label={microphoneStatus === "on" ? "Microphone track active" : microphoneStatus === "connecting" ? "Microphone connecting" : "Microphone muted"}
+        >
+          <ControlIcon name={microphoneStatus === "on" ? "microphone" : "microphone-off"} />
+          {microphoneStatus === "on" ? "Mic on" : microphoneStatus === "connecting" ? "Mic connecting" : "Muted"}
         </span>
       </div>
       <div className={styles.participantMeta}>
@@ -408,6 +433,7 @@ export default function LiveMediaRoom({
   const peerConnectionsRef = useRef(new Map<string, PeerConnectionState>());
   const peerProfilesRef = useRef(new Map<string, Participant>());
   const participantsRef = useRef<Participant[]>(participants);
+  const iceRestartingPeersRef = useRef(new Set<string>());
   const permissionSnapshotRef = useRef("");
   const pendingCandidatesRef = useRef(new Map<string, RTCIceCandidateInit[]>());
   const initiatedOffersRef = useRef(new Set<string>());
@@ -886,15 +912,46 @@ export default function LiveMediaRoom({
       type: PeerSignalType,
       payload: RTCSessionDescriptionInit | RTCIceCandidateInit,
     ) => {
-      await post({ action: "signal", participantId, recipientId, type, payload });
+      logMedia("signaling message send", {
+        recipientId,
+        type,
+        payloadLength: type === "candidate"
+          ? (payload as RTCIceCandidateInit).candidate?.length || 0
+          : (payload as RTCSessionDescriptionInit).sdp?.length || 0,
+        candidateType: type === "candidate"
+          ? (payload as RTCIceCandidateInit).candidate?.match(/\btyp\s+(\w+)/)?.[1] || "unknown"
+          : undefined,
+      });
+      for (let attempt = 0; attempt < 3; attempt += 1) {
+        try {
+          await post({ action: "signal", participantId, recipientId, type, payload });
+          logMedia("signaling message sent", { recipientId, type, attempts: attempt + 1 });
+          return;
+        } catch (reason) {
+          const retryable = type === "candidate" && reason instanceof MediaRequestError &&
+            [502, 503, 504].includes(reason.status);
+          logMedia(retryable && attempt < 2 ? "signaling message retrying" : "signaling message send failed", {
+            recipientId,
+            type,
+            attempt: attempt + 1,
+            error: mediaError(reason, "The signaling request failed."),
+          });
+          if (!retryable || attempt === 2) throw reason;
+          await new Promise((resolve) => window.setTimeout(resolve, 300 * (2 ** attempt)));
+        }
+      }
     };
 
     const closePeer = (peerId: string) => {
       const peer = peerConnectionsRef.current.get(peerId);
+      if (peer?.statsTimer !== null && peer?.statsTimer !== undefined) {
+        window.clearInterval(peer.statsTimer);
+      }
       peer?.connection.close();
       peerConnectionsRef.current.delete(peerId);
       pendingCandidatesRef.current.delete(peerId);
       initiatedOffersRef.current.delete(peerId);
+      iceRestartingPeersRef.current.delete(peerId);
       setRemoteMedia((current) => current.filter((entry) => entry.participantId !== peerId));
     };
 
@@ -925,6 +982,19 @@ export default function LiveMediaRoom({
       const currentAudio = (isTeacher || microphoneAllowedRef.current) && microphoneOnRef.current
         ? microphone?.getAudioTracks()[0] || null
         : null;
+      logMedia("peer transceivers created", {
+        participantId: participant.id,
+        transceivers: connection.getTransceivers().map((transceiver) => ({
+          kind: transceiver.receiver.track.kind,
+          direction: transceiver.direction,
+          mid: transceiver.mid,
+        })),
+        selectedLocalTracks: {
+          video: describeTrack(currentVideo),
+          screen: describeTrack(currentScreen),
+          audio: describeTrack(currentAudio),
+        },
+      });
       try {
         await videoTransceiver.sender.replaceTrack(currentVideo || null);
         logMedia("local video track published", { participantId: participant.id, tracks: describeTracks(camera) });
@@ -953,6 +1023,7 @@ export default function LiveMediaRoom({
         videoSender: videoTransceiver.sender,
         screenSender: screenTransceiver.sender,
         audioSender: audioTransceiver.sender,
+        statsTimer: null,
       };
       peerConnectionsRef.current.set(participant.id, peerState);
       connection.onicecandidate = (event) => {
@@ -962,13 +1033,50 @@ export default function LiveMediaRoom({
             type: event.candidate.type,
             protocol: event.candidate.protocol,
           });
-          void sendSignal(participant.id, "candidate", event.candidate.toJSON()).catch((reason: unknown) =>
-            {
-              logMedia("ICE candidate signaling failed", { participantId: participant.id, error: String(reason) });
-              setError(mediaError(reason, "A live media connection could not be established."));
-            });
+          void sendSignal(participant.id, "candidate", event.candidate.toJSON()).catch((reason: unknown) => {
+            logMedia("ICE candidate signaling failed", { participantId: participant.id, error: String(reason) });
+            setError(mediaError(reason, "A live media connection could not be established."));
+          });
         }
       };
+      const restartFailedPeer = async () => {
+        if (connection.iceConnectionState !== "failed" ||
+            connection.signalingState !== "stable" ||
+            iceRestartingPeersRef.current.has(participant.id)) return;
+        iceRestartingPeersRef.current.add(participant.id);
+        try {
+          connection.restartIce();
+          const offer = await connection.createOffer({ iceRestart: true });
+          await connection.setLocalDescription(offer);
+          if (!connection.localDescription) throw new Error("The browser could not create an ICE restart offer.");
+          logMedia("ICE restart offer created", {
+            participantId: participant.id,
+            signalingState: connection.signalingState,
+            sdpLength: connection.localDescription.sdp?.length || 0,
+          });
+          await sendSignal(participant.id, "offer", connection.localDescription.toJSON());
+        } catch (reason) {
+          iceRestartingPeersRef.current.delete(participant.id);
+          logMedia("ICE restart failed", {
+            participantId: participant.id,
+            error: mediaError(reason, "The ICE restart failed."),
+          });
+          setError(mediaError(reason, "The media connection could not restart."));
+        }
+      };
+      connection.onsignalingstatechange = () => {
+        logMedia("signaling state", {
+          participantId: participant.id,
+          state: connection.signalingState,
+          localDescriptionType: connection.localDescription?.type || null,
+          remoteDescriptionType: connection.remoteDescription?.type || null,
+        });
+        if (connection.signalingState === "stable") void restartFailedPeer();
+      };
+      connection.onicegatheringstatechange = () => logMedia("ICE gathering state", {
+        participantId: participant.id,
+        state: connection.iceGatheringState,
+      });
       connection.ontrack = (event) => {
         const profile = peerProfilesRef.current.get(participant.id) || participant;
         logMedia("track subscribed", {
@@ -980,6 +1088,12 @@ export default function LiveMediaRoom({
           muted: event.track.muted,
           readyState: event.track.readyState,
           streams: event.streams.length,
+          streamTrackCounts: event.streams.map((stream) => ({
+            audio: stream.getAudioTracks().length,
+            video: stream.getVideoTracks().length,
+          })),
+          transceiverMid: event.transceiver.mid,
+          transceiverDirection: event.transceiver.direction,
         });
         event.track.addEventListener("mute", () => logMedia("remote track muted", {
           participantId: participant.id,
@@ -1000,6 +1114,13 @@ export default function LiveMediaRoom({
         const source = kind === "audio"
           ? "microphone"
           : event.transceiver === screenTransceiver ? "screen" : "camera";
+        logMedia("remote media stored for rendering", {
+          participantId: participant.id,
+          kind,
+          source,
+          active: !event.track.muted && event.track.readyState === "live",
+          track: describeTrack(event.track),
+        });
         upsertRemoteMedia(profile, kind, source, event.track);
       };
       connection.onconnectionstatechange = () => {
@@ -1017,8 +1138,55 @@ export default function LiveMediaRoom({
           void logSelectedCandidatePair(connection, participant.id).then((pair) => {
             if (pair) setDebugCandidatePairs((current) => ({ ...current, [participant.id]: pair }));
           });
+          if (peerState.statsTimer === null &&
+              new URLSearchParams(window.location.search).get("debug") === "1") {
+            const logRtpStats = async () => {
+              if (!active || connection.connectionState !== "connected") return;
+              try {
+                const stats = await connection.getStats();
+                logMedia("peer RTP media stats", {
+                  participantId: participant.id,
+                  connectionState: connection.connectionState,
+                  signalingState: connection.signalingState,
+                  media: [...stats.values()]
+                    .filter((report) => report.type === "inbound-rtp" || report.type === "outbound-rtp")
+                    .map((report) => {
+                      const rtp = report as RTCStats & {
+                        kind?: string;
+                        mediaType?: string;
+                        bytesReceived?: number;
+                        bytesSent?: number;
+                        packetsReceived?: number;
+                        packetsSent?: number;
+                        framesReceived?: number;
+                        framesDecoded?: number;
+                        framesSent?: number;
+                        trackIdentifier?: string;
+                      };
+                      return {
+                        direction: report.type,
+                        kind: rtp.kind || rtp.mediaType || "unknown",
+                        trackId: rtp.trackIdentifier || null,
+                        bytesReceived: rtp.bytesReceived ?? null,
+                        bytesSent: rtp.bytesSent ?? null,
+                        packetsReceived: rtp.packetsReceived ?? null,
+                        packetsSent: rtp.packetsSent ?? null,
+                        framesReceived: rtp.framesReceived ?? null,
+                        framesDecoded: rtp.framesDecoded ?? null,
+                        framesSent: rtp.framesSent ?? null,
+                      };
+                    }),
+                });
+              } catch (reason) {
+                logMedia("peer RTP stats failed", { participantId: participant.id, error: String(reason) });
+              }
+            };
+            void logRtpStats();
+            peerState.statsTimer = window.setInterval(() => void logRtpStats(), 5000);
+          }
         }
         if (connection.connectionState === "connected") {
+          iceRestartingPeersRef.current.delete(participant.id);
           setMediaState("connected");
           setError("");
         } else if (connection.connectionState === "failed") {
@@ -1049,8 +1217,16 @@ export default function LiveMediaRoom({
           setError(hasTurnRelay
             ? "The media connection failed. Check the relay service and network access."
             : "The media connection failed. A configured TURN relay is required on some mobile and restricted networks.");
+          void restartFailedPeer();
         }
       };
+      logMedia("peer connection created", {
+        participantId: participant.id,
+        iceServerCount: iceServersRef.current.length,
+        hasTurnRelay: iceServersRef.current.some((server) =>
+          (Array.isArray(server.urls) ? server.urls : [server.urls])
+            .some((url) => /^turns?:/i.test(url))),
+      });
       return peerState;
     };
 
@@ -1060,9 +1236,23 @@ export default function LiveMediaRoom({
       initiatedOffersRef.current.add(participant.id);
       try {
         const { connection } = await createPeer(participant);
+        logMedia("offer creation started", {
+          participantId: participant.id,
+          signalingState: connection.signalingState,
+          transceivers: connection.getTransceivers().map((transceiver) => ({
+            kind: transceiver.receiver.track.kind,
+            direction: transceiver.direction,
+            senderTrack: describeTrack(transceiver.sender.track),
+          })),
+        });
         const offer = await connection.createOffer();
         await connection.setLocalDescription(offer);
         if (!connection.localDescription) throw new Error("The browser could not create a media offer.");
+        logMedia("offer created", {
+          participantId: participant.id,
+          sdpLength: connection.localDescription.sdp?.length || 0,
+          signalingState: connection.signalingState,
+        });
         await sendSignal(participant.id, "offer", connection.localDescription.toJSON());
       } catch (reason) {
         initiatedOffersRef.current.delete(participant.id);
@@ -1073,6 +1263,11 @@ export default function LiveMediaRoom({
     const flushCandidates = async (peerId: string, connection: RTCPeerConnection) => {
       const pending = pendingCandidatesRef.current.get(peerId) || [];
       pendingCandidatesRef.current.delete(peerId);
+      logMedia("queued ICE candidates flushed", {
+        participantId: peerId,
+        count: pending.length,
+        signalingState: connection.signalingState,
+      });
       for (const candidate of pending) await connection.addIceCandidate(candidate);
     };
 
@@ -1080,31 +1275,74 @@ export default function LiveMediaRoom({
       const participant = peerProfilesRef.current.get(signal.fromParticipantId);
       if (!participant) return;
       const { connection } = await createPeer(participant);
+      const payload = signal.payload as RTCSessionDescriptionInit | RTCIceCandidateInit;
+      logMedia("signaling message received", {
+        participantId: participant.id,
+        type: signal.type,
+        signalingState: connection.signalingState,
+        localDescriptionType: connection.localDescription?.type || null,
+        remoteDescriptionType: connection.remoteDescription?.type || null,
+        candidateType: signal.type === "candidate"
+          ? (payload as RTCIceCandidateInit).candidate?.match(/\btyp\s+(\w+)/)?.[1] || "unknown"
+          : undefined,
+      });
       if (signal.type === "candidate") {
-        const candidate = signal.payload as RTCIceCandidateInit;
+        const candidate = payload as RTCIceCandidateInit;
         if (connection.remoteDescription) {
           await connection.addIceCandidate(candidate);
+          logMedia("remote ICE candidate applied", { participantId: participant.id, signalingState: connection.signalingState });
         } else {
           const pending = pendingCandidatesRef.current.get(participant.id) || [];
           pending.push(candidate);
           pendingCandidatesRef.current.set(participant.id, pending);
+          logMedia("remote ICE candidate queued", { participantId: participant.id, queueLength: pending.length });
         }
         return;
       }
-      const description = signal.payload as RTCSessionDescriptionInit;
+      const description = payload as RTCSessionDescriptionInit;
       if (signal.type === "offer") {
         const collision = connection.signalingState !== "stable";
         const polite = participantId.localeCompare(participant.id) > 0;
+        logMedia("remote offer negotiation", {
+          participantId: participant.id,
+          collision,
+          polite,
+          signalingState: connection.signalingState,
+          sdpLength: description.sdp?.length || 0,
+        });
         if (collision && !polite) return;
         if (collision) await connection.setLocalDescription({ type: "rollback" });
+        if (connection.iceConnectionState === "failed") {
+          iceRestartingPeersRef.current.add(participant.id);
+        }
         await connection.setRemoteDescription(description);
+        logMedia("remote offer applied", {
+          participantId: participant.id,
+          signalingState: connection.signalingState,
+          transceivers: connection.getTransceivers().map((transceiver) => ({
+            kind: transceiver.receiver.track.kind,
+            direction: transceiver.direction,
+            currentDirection: transceiver.currentDirection,
+            senderTrack: describeTrack(transceiver.sender.track),
+          })),
+        });
         await flushCandidates(participant.id, connection);
         const answer = await connection.createAnswer();
         await connection.setLocalDescription(answer);
         if (!connection.localDescription) throw new Error("The browser could not create a media answer.");
+        logMedia("answer created", {
+          participantId: participant.id,
+          sdpLength: connection.localDescription.sdp?.length || 0,
+          signalingState: connection.signalingState,
+        });
         await sendSignal(participant.id, "answer", connection.localDescription.toJSON());
       } else {
         await connection.setRemoteDescription(description);
+        logMedia("remote answer applied", {
+          participantId: participant.id,
+          signalingState: connection.signalingState,
+          sdpLength: description.sdp?.length || 0,
+        });
         await flushCandidates(participant.id, connection);
       }
     };
@@ -1342,7 +1580,17 @@ export default function LiveMediaRoom({
   const localScreen = screenOn ? screenStreamRef.current : null;
   const teacher = participants.find((participant) => participant.role === "teacher");
   const teacherIsSharingScreen = Boolean(teacher?.screenOn || (isTeacher && screenOn));
-  const teacherMicrophoneOn = teacher?.id === participantIdRef.current ? microphoneOn : Boolean(teacher?.microphoneOn);
+  const microphoneStatusFor = (participant: Participant): "on" | "muted" | "connecting" => {
+    if (participant.id === participantIdRef.current) {
+      const track = microphoneStreamRef.current?.getAudioTracks()[0];
+      return microphoneOn && track?.enabled && track.readyState === "live" ? "on" : "muted";
+    }
+    if (!participant.microphoneOn) return "muted";
+    const track = remoteMedia.find((entry) =>
+      entry.participantId === participant.id && entry.kind === "audio")?.stream.getAudioTracks()[0];
+    return track?.enabled && !track.muted && track.readyState === "live" ? "on" : "connecting";
+  };
+  const teacherMicrophoneStatus = teacher ? microphoneStatusFor(teacher) : "muted";
   const teacherCamera = teacher?.id === participantIdRef.current
     ? (cameraOn ? localVideo : null)
     : remoteMedia.find((entry) =>
@@ -1473,9 +1721,9 @@ export default function LiveMediaRoom({
               <>
                 <span className={styles.screenShareBadge}>{mainLabel}</span>
                 {teacherStream && (
-                  <span className={styles.mainMicIndicator} aria-label={teacherMicrophoneOn ? "Tutor microphone on" : "Tutor microphone muted"}>
-                    <ControlIcon name={teacherMicrophoneOn ? "microphone" : "microphone-off"} />
-                    {teacherMicrophoneOn ? "Mic on" : "Muted"}
+                  <span className={styles.mainMicIndicator} aria-label={teacherMicrophoneStatus === "on" ? "Tutor microphone track active" : teacherMicrophoneStatus === "connecting" ? "Tutor microphone connecting" : "Tutor microphone muted"}>
+                    <ControlIcon name={teacherMicrophoneStatus === "on" ? "microphone" : "microphone-off"} />
+                    {teacherMicrophoneStatus === "on" ? "Mic on" : teacherMicrophoneStatus === "connecting" ? "Mic connecting" : "Muted"}
                   </span>
                 )}
               </>
@@ -1511,6 +1759,7 @@ export default function LiveMediaRoom({
                   key={participant.id}
                   participant={participant}
                   stream={cameraForParticipant(participant)}
+                  microphoneStatus={microphoneStatusFor(participant)}
                   isSelf={participant.id === participantIdRef.current}
                   isSpeaker={activeSpeakerId ? activeSpeakerId === participant.id : participant.role === "teacher"}
                   canManageMicrophone={isTeacher && classStatus === "live"}
@@ -1540,6 +1789,7 @@ export default function LiveMediaRoom({
               key={participant.id}
               participant={participant}
               stream={cameraForParticipant(participant)}
+              microphoneStatus={microphoneStatusFor(participant)}
               isSelf={participant.id === participantIdRef.current}
               isSpeaker={activeSpeakerId ? activeSpeakerId === participant.id : participant.role === "teacher"}
               canManageMicrophone={isTeacher && classStatus === "live"}
