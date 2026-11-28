@@ -103,18 +103,18 @@ teacher for approval or feedback; this review does not change module access.
 
 ## Live classes
 
-Live classes use the self-hosted mediasoup service for real-time video, audio,
-and tutor screen sharing. Students join muted; tutors can search participants
-and control microphones individually or for the whole class. Chat messages
-include profile photos or gender-based fallback avatars. Only tutors record:
-the tutor's browser captures a selected tab or screen and microphone, saves
-chunks in IndexedDB, and automatically uploads a recording snapshot every
-30 seconds. The final snapshot is uploaded and saved when the class ends.
+Live classes use browser-to-browser WebRTC for real-time video, audio, and
+tutor screen sharing, with authenticated API signaling. No dedicated media
+server is required. Students join muted; tutors can search participants and
+control microphones individually or for the whole class. Chat messages include
+profile photos or gender-based fallback avatars. Only tutors record: the
+tutor's browser captures a selected tab or screen and microphone, saves chunks
+in IndexedDB, and automatically uploads a recording snapshot every 30 seconds.
+The final snapshot is uploaded and saved when the class ends.
 
-Run `npm run db:migrate` before starting classes. Enable
-`MEDIASOUP_ENABLED=true` and configure the media server's public IP and
-reachable UDP port range in production. Set the recording-storage credentials
-on the server; do not expose them with `NEXT_PUBLIC_` prefixes. Browser capture
-requires the tutor to authorize screen/tab sharing and works best in current
-Chrome or Edge over HTTPS. See [docs/LIVE_CLASS_SETUP.md](./docs/LIVE_CLASS_SETUP.md)
-for network, browser, and deployment requirements.
+Run `npm run db:migrate` before starting classes. Set `STUN_URL` for network
+address discovery and configure TURN when participants' networks block direct
+connections. Set recording-storage credentials on the server; do not expose
+them with `NEXT_PUBLIC_` prefixes. Browser capture requires the tutor to
+authorize screen/tab sharing and works best in current Chrome or Edge over
+HTTPS. See [docs/LIVE_CLASS_SETUP.md](./docs/LIVE_CLASS_SETUP.md) for details.

@@ -27,6 +27,10 @@ import {
   isLiveClassChatMessageId,
   normalizeLiveClassChatBody,
 } from "./live-session-chat.js";
+import {
+  isPeerMediaUuid,
+  normalizePeerMediaSignal,
+} from "./live-session-peer.js";
 
 interface CollaborationAccount {
   id: string;
@@ -2406,6 +2410,14 @@ async function endLiveSession(
       [sessionId],
     );
     await client.query(
+      "DELETE FROM tgf_live_class_media_signals WHERE session_id = $1",
+      [sessionId],
+    );
+    await client.query(
+      "DELETE FROM tgf_live_class_media_participants WHERE session_id = $1",
+      [sessionId],
+    );
+    await client.query(
       `DELETE FROM tgf_notifications
        WHERE notification_type = 'live-class-invitation'
          AND data ->> 'liveSessionId' = $1`,
@@ -2689,6 +2701,219 @@ async function updateParticipantMicrophone(
     updated: updated.rowCount || 0,
     microphoneAllowed: allowMicrophone,
   });
+}
+
+async function getPeerMediaAccess(
+  sessionId: string,
+  account: CollaborationAccount,
+  services: CollaborationServices,
+): Promise<{ session?: { programme_id: string; teacher_id: string }; response?: Response }> {
+  if (!isUuid(sessionId)) {
+    return { response: services.jsonResponse(404, { error: "This live class was not found." }) };
+  }
+  if (account.role !== "teacher" && account.role !== "learner") {
+    return { response: services.jsonResponse(403, { error: "Only the assigned tutor and enrolled students can join this class." }) };
+  }
+  const result = await services.pool.query<{ programme_id: string; teacher_id: string; class_status: string; ended_at: Date | null }>(
+    `SELECT programme_id, teacher_id, class_status, ended_at
+     FROM tgf_live_sessions WHERE id = $1`,
+    [sessionId],
+  );
+  const session = result.rows[0];
+  if (!session) {
+    return { response: services.jsonResponse(404, { error: "This live class is unavailable." }) };
+  }
+  if (account.role === "teacher") {
+    if (account.id !== session.teacher_id) {
+      return { response: services.jsonResponse(403, { error: "Only the assigned tutor can join this class." }) };
+    }
+  } else {
+    const enrolled = await services.pool.query(
+      `SELECT 1 FROM tgf_enrollments
+       WHERE user_id = $1 AND programme_id = $2 AND approval_status = 'approved'`,
+      [account.id, session.programme_id],
+    );
+    if (!enrolled.rowCount) {
+      return { response: services.jsonResponse(403, { error: "You must be enrolled in this course to join." }) };
+    }
+  }
+  if (session.class_status !== "live" || session.ended_at) {
+    return { response: services.jsonResponse(409, { error: "This class is not live." }) };
+  }
+  return { session };
+}
+
+async function handlePeerMediaRequest(
+  request: Request,
+  sessionId: string,
+  account: CollaborationAccount,
+  services: CollaborationServices,
+): Promise<Response> {
+  const access = await getPeerMediaAccess(sessionId, account, services);
+  if (access.response) return access.response;
+
+  if (request.method === "GET") {
+    const participantId = new URL(request.url).searchParams.get("participantId") || "";
+    const afterValue = new URL(request.url).searchParams.get("after") || "0";
+    const after = Number(afterValue);
+    if (!isPeerMediaUuid(participantId) || !Number.isSafeInteger(after) || after < 0) {
+      return services.jsonResponse(400, { error: "The live media connection is invalid." });
+    }
+    const joined = await services.pool.query(
+      `SELECT 1 FROM tgf_live_class_media_participants
+       WHERE session_id = $1 AND participant_id = $2 AND user_id = $3
+         AND last_seen_at > NOW() - INTERVAL '30 seconds'`,
+      [sessionId, participantId, account.id],
+    );
+    if (!joined.rowCount) {
+      return services.jsonResponse(409, { error: "Rejoin the class to restore your media connection." });
+    }
+    const [participantResult, signalResult] = await Promise.all([
+      services.pool.query(
+        `SELECT participant.participant_id AS id, participant.user_id AS "userId",
+                media_user.full_name AS name,
+                CASE WHEN media_user.role = 'teacher' THEN 'teacher' ELSE 'student' END AS role,
+                CASE WHEN media_user.role = 'teacher' THEN TRUE
+                     ELSE COALESCE(attendance.microphone_allowed, FALSE) END AS "micAllowed",
+                (participant.microphone_on AND
+                  (media_user.role = 'teacher' OR COALESCE(attendance.microphone_allowed, FALSE))) AS "microphoneOn",
+                participant.camera_on AS "cameraOn",
+                participant.screen_on AS "screenOn",
+                COALESCE(
+                  NULLIF(to_jsonb(media_user)->>'profile_photo_url', ''),
+                  NULLIF(to_jsonb(media_user)->>'teacher_profile_photo_url', ''),
+                  ''
+                ) AS "profilePhotoUrl",
+                COALESCE(to_jsonb(media_user)->>'gender', 'unspecified') AS gender
+         FROM tgf_live_class_media_participants participant
+         JOIN tgf_users media_user ON media_user.id = participant.user_id
+           AND media_user.account_status = 'active' AND media_user.is_frozen = FALSE
+         LEFT JOIN tgf_live_session_attendance attendance
+           ON attendance.session_id = participant.session_id
+           AND attendance.user_id = participant.user_id
+           AND attendance.participant_role = 'learner'
+         WHERE participant.session_id = $1
+           AND participant.last_seen_at > NOW() - INTERVAL '30 seconds'
+         ORDER BY participant.last_seen_at, media_user.full_name`,
+        [sessionId],
+      ),
+      services.pool.query(
+        `SELECT id, from_participant_id AS "fromParticipantId",
+                signal_type AS type, payload
+         FROM tgf_live_class_media_signals
+         WHERE session_id = $1 AND to_participant_id = $2 AND id > $3
+           AND created_at > NOW() - INTERVAL '5 minutes'
+         ORDER BY id
+         LIMIT 100`,
+        [sessionId, participantId, after],
+      ),
+    ]);
+    const signals = signalResult.rows.map((signal) => ({
+      ...signal,
+      id: Number(signal.id),
+    }));
+    return services.jsonResponse(200, {
+      participants: participantResult.rows,
+      signals,
+      cursor: signals.length ? signals[signals.length - 1].id : after,
+      iceServers: [
+        { urls: process.env.STUN_URL || "stun:stun.l.google.com:19302" },
+        ...(process.env.TURN_URL && process.env.TURN_USERNAME && process.env.TURN_CREDENTIAL
+          ? [{
+            urls: process.env.TURN_URL,
+            username: process.env.TURN_USERNAME,
+            credential: process.env.TURN_CREDENTIAL,
+          }]
+          : []),
+      ],
+    });
+  }
+
+  const body = await readJson(request);
+  const participantId = typeof body.participantId === "string" ? body.participantId : "";
+  if (!isPeerMediaUuid(participantId)) {
+    return services.jsonResponse(400, { error: "The live media connection is invalid." });
+  }
+  if (body.action === "heartbeat") {
+    if (typeof body.cameraOn !== "boolean" ||
+        typeof body.microphoneOn !== "boolean" ||
+        typeof body.screenOn !== "boolean") {
+      return services.jsonResponse(400, { error: "The live media status is invalid." });
+    }
+    const presence = await services.pool.query(
+      `INSERT INTO tgf_live_class_media_participants
+         (session_id, participant_id, user_id, camera_on, microphone_on, screen_on, last_seen_at)
+       SELECT $1, $2, $3, $4,
+              ($5 AND ($6 OR COALESCE(attendance.microphone_allowed, FALSE))),
+              $7, NOW()
+       FROM tgf_users media_user
+       LEFT JOIN tgf_live_session_attendance attendance
+         ON attendance.session_id = $1 AND attendance.user_id = media_user.id
+         AND attendance.participant_role = 'learner'
+       WHERE media_user.id = $3 AND media_user.account_status = 'active' AND media_user.is_frozen = FALSE
+       ON CONFLICT (session_id, participant_id) DO UPDATE SET
+         camera_on = EXCLUDED.camera_on,
+         microphone_on = EXCLUDED.microphone_on,
+         screen_on = EXCLUDED.screen_on,
+         last_seen_at = NOW()
+       WHERE tgf_live_class_media_participants.user_id = EXCLUDED.user_id
+       RETURNING participant_id`,
+      [sessionId, participantId, account.id, body.cameraOn, body.microphoneOn, account.role === "teacher", body.screenOn],
+    );
+    if (!presence.rowCount) {
+      return services.jsonResponse(409, { error: "Your live media session could not be registered." });
+    }
+    await services.pool.query(
+      `DELETE FROM tgf_live_class_media_signals
+       WHERE session_id = $1 AND created_at < NOW() - INTERVAL '1 day'`,
+      [sessionId],
+    );
+    return services.jsonResponse(200, { updated: true });
+  }
+  if (body.action === "signal") {
+    const recipientId = typeof body.recipientId === "string" ? body.recipientId : "";
+    const signal = normalizePeerMediaSignal({ type: body.type, payload: body.payload });
+    if (!isPeerMediaUuid(recipientId) || recipientId === participantId || !signal) {
+      return services.jsonResponse(400, { error: "The live media signal is invalid." });
+    }
+    const activePeers = await services.pool.query(
+      `SELECT 1
+       FROM tgf_live_class_media_participants sender
+       JOIN tgf_live_class_media_participants recipient
+         ON recipient.session_id = sender.session_id
+       WHERE sender.session_id = $1 AND sender.participant_id = $2
+         AND sender.user_id = $3 AND sender.last_seen_at > NOW() - INTERVAL '30 seconds'
+         AND recipient.participant_id = $4
+         AND recipient.last_seen_at > NOW() - INTERVAL '30 seconds'`,
+      [sessionId, participantId, account.id, recipientId],
+    );
+    if (!activePeers.rowCount) {
+      return services.jsonResponse(409, { error: "The other participant is no longer connected." });
+    }
+    const inserted = await services.pool.query(
+      `INSERT INTO tgf_live_class_media_signals
+         (session_id, from_participant_id, to_participant_id, signal_type, payload)
+       VALUES ($1, $2, $3, $4, $5::jsonb)
+       RETURNING id`,
+      [sessionId, participantId, recipientId, signal.type, JSON.stringify(signal.payload)],
+    );
+    return services.jsonResponse(200, { sent: true, id: Number(inserted.rows[0].id) });
+  }
+  if (body.action === "leave") {
+    await services.pool.query(
+      `DELETE FROM tgf_live_class_media_participants
+       WHERE session_id = $1 AND participant_id = $2 AND user_id = $3`,
+      [sessionId, participantId, account.id],
+    );
+    await services.pool.query(
+      `DELETE FROM tgf_live_class_media_signals
+       WHERE session_id = $1
+         AND (from_participant_id = $2 OR to_participant_id = $2)`,
+      [sessionId, participantId],
+    );
+    return services.jsonResponse(200, { left: true });
+  }
+  return services.jsonResponse(400, { error: "Choose a valid live media action." });
 }
 
 async function failRecording(
@@ -3540,6 +3765,12 @@ export async function handleCollaborationRequest(
         segments.slice(0, 3).join("/") === "api/collaboration/live-sessions" &&
         segments[4] === "join" && request.method === "POST") {
       return await joinInstantSession(segments[3], account, services);
+    }
+    if (segments.length === 5 &&
+        segments.slice(0, 3).join("/") === "api/collaboration/sessions" &&
+        segments[4] === "media" &&
+        (request.method === "GET" || request.method === "POST")) {
+      return await handlePeerMediaRequest(request, segments[3], account, services);
     }
     if (segments.length === 5 &&
         segments.slice(0, 3).join("/") === "api/collaboration/notifications" &&
