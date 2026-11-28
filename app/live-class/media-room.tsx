@@ -85,7 +85,82 @@ function mediaError(error: unknown, fallback: string): string {
 }
 
 function logMedia(event: string, details: Record<string, unknown> = {}) {
+  if (typeof window === "undefined" || new URLSearchParams(window.location.search).get("debug") !== "1") return;
   console.info("[live-class-media]", event, details);
+}
+
+function describeTracks(stream: MediaStream | null) {
+  return stream?.getTracks().map((track) => ({
+    kind: track.kind,
+    id: track.id,
+    enabled: track.enabled,
+    muted: track.muted,
+    readyState: track.readyState,
+  })) || [];
+}
+
+interface CandidatePairSummary {
+  localType: string;
+  remoteType: string;
+  protocol: string;
+}
+
+function trackStatus(streams: Array<MediaStream | null>, kind: MediaKind): string {
+  const tracks = streams.flatMap((stream) =>
+    stream?.getTracks().filter((track) => track.kind === kind) || []);
+  if (tracks.length === 0) return "none";
+  return tracks.map((track) =>
+    `${track.readyState}${track.muted ? " muted" : ""}${track.enabled ? "" : " disabled"}`).join(", ");
+}
+
+async function logSelectedCandidatePair(
+  connection: RTCPeerConnection,
+  participantId: string,
+): Promise<CandidatePairSummary | null> {
+  try {
+    const stats = await connection.getStats();
+    const transport = [...stats.values()].find((report) => report.type === "transport") as RTCTransportStats | undefined;
+    const selectedPairId = transport?.selectedCandidatePairId;
+    const pair = (selectedPairId ? stats.get(selectedPairId) : undefined) ||
+      [...stats.values()].find((report) =>
+        report.type === "candidate-pair" &&
+        (report as RTCIceCandidatePairStats).state === "succeeded" &&
+        (report as RTCIceCandidatePairStats).nominated);
+    if (!pair) {
+      logMedia("ICE selected candidate pair unavailable", {
+        participantId,
+        iceConnectionState: connection.iceConnectionState,
+      });
+      return null;
+    }
+
+    const candidatePair = pair as RTCIceCandidatePairStats;
+    const local = stats.get(candidatePair.localCandidateId) as (RTCStats & {
+      candidateType?: string;
+      protocol?: string;
+    }) | undefined;
+    const remote = stats.get(candidatePair.remoteCandidateId) as (RTCStats & {
+      candidateType?: string;
+      protocol?: string;
+    }) | undefined;
+    const summary = {
+      localType: local?.candidateType || "unknown",
+      remoteType: remote?.candidateType || "unknown",
+      protocol: local?.protocol || remote?.protocol || "unknown",
+    };
+    logMedia("ICE selected candidate pair", {
+      participantId,
+      ...summary,
+      state: candidatePair.state,
+      nominated: candidatePair.nominated,
+      bytesSent: candidatePair.bytesSent,
+      bytesReceived: candidatePair.bytesReceived,
+    });
+    return summary;
+  } catch (reason) {
+    logMedia("ICE candidate pair stats failed", { participantId, error: String(reason) });
+    return null;
+  }
 }
 
 function ControlIcon({ name }: { name: "microphone" | "microphone-off" | "camera" | "camera-off" | "screen" | "microphone-all" }) {
@@ -129,21 +204,49 @@ export function ParticipantAvatar({
   return <span className={styles.participantInitial} aria-hidden="true">{name.trim().charAt(0).toUpperCase() || "?"}</span>;
 }
 
-function VideoView({ stream, label, className, muted = false }: { stream: MediaStream; label: string; className: string; muted?: boolean }) {
+function VideoView({ stream, label, className, muted = true }: { stream: MediaStream; label: string; className: string; muted?: boolean }) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
+  const [needsGesture, setNeedsGesture] = useState(false);
   useEffect(() => {
     const video = videoRef.current;
     if (!video) return;
     video.srcObject = stream;
-    logMedia("video track attached", { label, streamId: stream.id, tracks: stream.getVideoTracks().length });
-    void video.play().catch((error: unknown) => {
-      logMedia("video playback blocked", { label, error: mediaError(error, "Playback was blocked.") });
-    });
+    logMedia("video track attached", { label, streamId: stream.id, tracks: describeTracks(stream) });
+    const playVideo = () => {
+      void video.play().then(() => setNeedsGesture(false)).catch((error: unknown) => {
+        setNeedsGesture(true);
+        logMedia("video playback blocked", { label, error: mediaError(error, "Playback was blocked.") });
+      });
+    };
+    const tracks = stream.getVideoTracks();
+    tracks.forEach((track) => track.addEventListener("unmute", playVideo));
+    video.addEventListener("loadedmetadata", playVideo);
+    playVideo();
     return () => {
+      tracks.forEach((track) => track.removeEventListener("unmute", playVideo));
+      video.removeEventListener("loadedmetadata", playVideo);
       video.srcObject = null;
     };
   }, [label, stream]);
-  return <video ref={videoRef} className={className} autoPlay muted={muted} playsInline aria-label={label} />;
+  return (
+    <>
+      <video ref={videoRef} className={className} autoPlay muted={muted} playsInline aria-label={label} />
+      {needsGesture && (
+        <button
+          className={styles.videoEnableButton}
+          type="button"
+          onClick={() => {
+            const video = videoRef.current;
+            if (!video) return;
+            void video.play().then(() => setNeedsGesture(false)).catch((error: unknown) =>
+              logMedia("video playback still blocked", { label, error: mediaError(error, "Playback remains blocked.") }));
+          }}
+        >
+          Tap to join audio/video
+        </button>
+      )}
+    </>
+  );
 }
 
 function AudioView({ stream, participantName }: { stream: MediaStream; participantName: string }) {
@@ -155,12 +258,20 @@ function AudioView({ stream, participantName }: { stream: MediaStream; participa
     audio.srcObject = stream;
     audio.muted = false;
     audio.volume = 1;
-    logMedia("audio track attached", { participantName, streamId: stream.id, tracks: stream.getAudioTracks().length });
-    void audio.play().then(() => setNeedsGesture(false)).catch((error: unknown) => {
-      setNeedsGesture(true);
-      logMedia("audio playback blocked", { participantName, error: mediaError(error, "Playback requires a user gesture.") });
-    });
+    logMedia("audio track attached", { participantName, streamId: stream.id, tracks: describeTracks(stream) });
+    const playAudio = () => {
+      void audio.play().then(() => setNeedsGesture(false)).catch((error: unknown) => {
+        setNeedsGesture(true);
+        logMedia("audio playback blocked", { participantName, error: mediaError(error, "Playback requires a user gesture.") });
+      });
+    };
+    const tracks = stream.getAudioTracks();
+    tracks.forEach((track) => track.addEventListener("unmute", playAudio));
+    audio.addEventListener("loadedmetadata", playAudio);
+    playAudio();
     return () => {
+      tracks.forEach((track) => track.removeEventListener("unmute", playAudio));
+      audio.removeEventListener("loadedmetadata", playAudio);
       audio.srcObject = null;
     };
   }, [participantName, stream]);
@@ -184,7 +295,7 @@ function AudioView({ stream, participantName }: { stream: MediaStream; participa
       <audio ref={audioRef} autoPlay />
       {needsGesture && (
         <button className={styles.audioEnableButton} type="button" onClick={() => void enableSound()}>
-          Tap to enable sound
+          Tap to join audio/video
         </button>
       )}
     </>
@@ -211,7 +322,7 @@ function ParticipantTile({
     <article className={classes} key={participant.id}>
       <div className={styles.participantVideo}>
         {stream
-          ? <VideoView stream={stream} label={`${participant.name}'s camera`} className={styles.participantVideoElement} muted={isSelf} />
+          ? <VideoView stream={stream} label={`${participant.name}'s camera`} className={styles.participantVideoElement} muted />
           : <ParticipantAvatar name={participant.name} photoUrl={participant.profilePhotoUrl} gender={participant.gender} />}
         {participant.cameraOn && !stream && (
           <span className={styles.cameraOffIndicator}>Connecting video</span>
@@ -264,6 +375,11 @@ export default function LiveMediaRoom({
   const [stripPosition, setStripPosition] = useState<StripPosition>("bottom");
   const [viewPreferencesLoaded, setViewPreferencesLoaded] = useState(false);
   const [activeSpeakerId, setActiveSpeakerId] = useState<string | null>(null);
+  const [debugEnabled, setDebugEnabled] = useState(false);
+  const [debugIceConfig, setDebugIceConfig] = useState<{ secureContext: boolean; hasTurnRelay: boolean } | null>(null);
+  const [debugCandidatePairs, setDebugCandidatePairs] = useState<Record<string, CandidatePairSummary>>({});
+  const [debugPeerStates, setDebugPeerStates] = useState<Record<string, { connection: string; ice: string }>>({});
+  const [screenSharingSupported, setScreenSharingSupported] = useState(false);
   const mediaUrl = `/api/collaboration/sessions/${encodeURIComponent(sessionId)}/media`;
   const participantIdRef = useRef("");
   const cameraStreamRef = useRef<MediaStream | null>(null);
@@ -279,6 +395,7 @@ export default function LiveMediaRoom({
   const peerConnectionsRef = useRef(new Map<string, PeerConnectionState>());
   const peerProfilesRef = useRef(new Map<string, Participant>());
   const participantsRef = useRef<Participant[]>(participants);
+  const permissionSnapshotRef = useRef("");
   const pendingCandidatesRef = useRef(new Map<string, RTCIceCandidateInit[]>());
   const initiatedOffersRef = useRef(new Set<string>());
   const iceServersRef = useRef<RTCIceServer[]>([]);
@@ -289,6 +406,11 @@ export default function LiveMediaRoom({
 
   remoteMediaRef.current = remoteMedia;
   participantsRef.current = participants;
+
+  useEffect(() => {
+    setDebugEnabled(new URLSearchParams(window.location.search).get("debug") === "1");
+    setScreenSharingSupported(typeof navigator.mediaDevices?.getDisplayMedia === "function");
+  }, []);
 
   useEffect(() => {
     try {
@@ -324,7 +446,11 @@ export default function LiveMediaRoom({
     if (cameraCapturePromiseRef.current) return cameraCapturePromiseRef.current;
     cameraStreamRef.current?.getTracks().forEach((track) => track.stop());
     cameraStreamRef.current = null;
-    if (!navigator.mediaDevices?.getUserMedia) throw new Error("Camera access is not available in this browser.");
+    if (!navigator.mediaDevices?.getUserMedia) {
+      const error = new Error("Camera access is not available in this browser.");
+      logMedia("getUserMedia video failure", { error: error.message });
+      throw error;
+    }
     const capture = navigator.mediaDevices.getUserMedia({
       video: {
         width: { ideal: 640, max: 1280 },
@@ -337,13 +463,17 @@ export default function LiveMediaRoom({
     cameraCapturePromiseRef.current = capture;
     try {
       const stream = await capture;
+      if (!stream.getVideoTracks().length) throw new Error("The browser returned no camera track.");
       cameraStreamRef.current = stream;
       cameraOnRef.current = true;
       setCameraOn(true);
       setLocalVideo(stream);
       setCameraError("");
-      logMedia("camera captured", { tracks: stream.getVideoTracks().map((track) => ({ id: track.id, readyState: track.readyState })) });
+      logMedia("getUserMedia video success", { tracks: describeTracks(stream) });
       return stream;
+    } catch (reason) {
+      logMedia("getUserMedia video failure", { error: mediaError(reason, "Camera access failed.") });
+      throw reason;
     } finally {
       if (cameraCapturePromiseRef.current === capture) cameraCapturePromiseRef.current = null;
     }
@@ -352,16 +482,24 @@ export default function LiveMediaRoom({
   const ensureMicrophone = useCallback(async () => {
     if (microphoneStreamRef.current) return microphoneStreamRef.current;
     if (microphoneCapturePromiseRef.current) return microphoneCapturePromiseRef.current;
-    if (!navigator.mediaDevices?.getUserMedia) throw new Error("Microphone access is not available in this browser.");
+    if (!navigator.mediaDevices?.getUserMedia) {
+      const error = new Error("Microphone access is not available in this browser.");
+      logMedia("getUserMedia audio failure", { error: error.message });
+      throw error;
+    }
     const capture = navigator.mediaDevices.getUserMedia({ audio: true, video: false });
     microphoneCapturePromiseRef.current = capture;
     try {
       const stream = await capture;
       const track = stream.getAudioTracks()[0];
+      if (!track) throw new Error("The browser returned no microphone track.");
       if (track) track.enabled = false;
       microphoneStreamRef.current = stream;
-      logMedia("microphone captured", { trackId: track?.id, readyState: track?.readyState });
+      logMedia("getUserMedia audio success", { tracks: describeTracks(stream) });
       return stream;
+    } catch (reason) {
+      logMedia("getUserMedia audio failure", { error: mediaError(reason, "Microphone access failed.") });
+      throw reason;
     } finally {
       if (microphoneCapturePromiseRef.current === capture) microphoneCapturePromiseRef.current = null;
     }
@@ -379,10 +517,19 @@ export default function LiveMediaRoom({
     if (!track) throw new Error("No microphone was found.");
     const shouldPublish = enabled && permitted;
     track.enabled = shouldPublish;
-    await Promise.all([...peerConnectionsRef.current.values()].map(({ audioSender }) =>
-      audioSender.replaceTrack(shouldPublish ? track : null)));
+    try {
+      await Promise.all([...peerConnectionsRef.current.values()].map(({ audioSender }) =>
+        audioSender.replaceTrack(shouldPublish ? track : null)));
+    } catch (reason) {
+      logMedia("local audio track publication failed", {
+        tracks: describeTracks(new MediaStream([track])),
+        permitted,
+        error: mediaError(reason, "The microphone track could not be updated."),
+      });
+      throw reason;
+    }
     logMedia(shouldPublish ? "microphone published" : "microphone unpublished", {
-      trackId: shouldPublish ? track.id : null,
+      tracks: describeTracks(shouldPublish ? new MediaStream([track]) : null),
       permitted,
       peers: peerConnectionsRef.current.size,
     });
@@ -765,14 +912,28 @@ export default function LiveMediaRoom({
       const currentAudio = (isTeacher || microphoneAllowedRef.current) && microphoneOnRef.current
         ? microphone?.getAudioTracks()[0] || null
         : null;
-      await videoTransceiver.sender.replaceTrack(currentVideo || null);
-      await screenTransceiver.sender.replaceTrack(currentScreen);
-      await audioTransceiver.sender.replaceTrack(currentAudio || null);
+      try {
+        await videoTransceiver.sender.replaceTrack(currentVideo || null);
+        logMedia("local video track published", { participantId: participant.id, tracks: describeTracks(camera) });
+        await screenTransceiver.sender.replaceTrack(currentScreen);
+        logMedia("local screen track published", { participantId: participant.id, tracks: describeTracks(screenStreamRef.current) });
+        await audioTransceiver.sender.replaceTrack(currentAudio || null);
+        logMedia("local audio track published", { participantId: participant.id, tracks: describeTracks(microphone) });
+      } catch (reason) {
+        logMedia("local track publication failed", {
+          participantId: participant.id,
+          videoTrackId: currentVideo?.id || null,
+          screenTrackId: currentScreen?.id || null,
+          audioTrackId: currentAudio?.id || null,
+          error: mediaError(reason, "A local media track could not be published."),
+        });
+        throw reason;
+      }
       logMedia("tracks published", {
         participantId: participant.id,
-        videoTrackId: currentVideo?.id || null,
-        screenTrackId: currentScreen?.id || null,
-        audioTrackId: currentAudio?.id || null,
+        video: describeTracks(currentVideo ? new MediaStream([currentVideo]) : null),
+        screen: describeTracks(currentScreen ? new MediaStream([currentScreen]) : null),
+        audio: describeTracks(currentAudio ? new MediaStream([currentAudio]) : null),
       });
       const peerState: PeerConnectionState = {
         connection,
@@ -783,8 +944,16 @@ export default function LiveMediaRoom({
       peerConnectionsRef.current.set(participant.id, peerState);
       connection.onicecandidate = (event) => {
         if (event.candidate && active) {
+          logMedia("local ICE candidate gathered", {
+            participantId: participant.id,
+            type: event.candidate.type,
+            protocol: event.candidate.protocol,
+          });
           void sendSignal(participant.id, "candidate", event.candidate.toJSON()).catch((reason: unknown) =>
-            setError(mediaError(reason, "A live media connection could not be established.")));
+            {
+              logMedia("ICE candidate signaling failed", { participantId: participant.id, error: String(reason) });
+              setError(mediaError(reason, "A live media connection could not be established."));
+            });
         }
       };
       connection.ontrack = (event) => {
@@ -794,9 +963,26 @@ export default function LiveMediaRoom({
           participantName: profile.name,
           kind: event.track.kind,
           trackId: event.track.id,
+          enabled: event.track.enabled,
+          muted: event.track.muted,
           readyState: event.track.readyState,
           streams: event.streams.length,
         });
+        event.track.addEventListener("mute", () => logMedia("remote track muted", {
+          participantId: participant.id,
+          kind: event.track.kind,
+          trackId: event.track.id,
+        }));
+        event.track.addEventListener("unmute", () => logMedia("remote track unmuted", {
+          participantId: participant.id,
+          kind: event.track.kind,
+          trackId: event.track.id,
+        }));
+        event.track.addEventListener("ended", () => logMedia("remote track ended", {
+          participantId: participant.id,
+          kind: event.track.kind,
+          trackId: event.track.id,
+        }), { once: true });
         const kind = event.track.kind === "video" ? "video" : "audio";
         const source = kind === "audio"
           ? "microphone"
@@ -805,11 +991,20 @@ export default function LiveMediaRoom({
       };
       connection.onconnectionstatechange = () => {
         if (!active) return;
+        setDebugPeerStates((current) => ({
+          ...current,
+          [participant.id]: { connection: connection.connectionState, ice: connection.iceConnectionState },
+        }));
         logMedia("peer connection state", {
           participantId: participant.id,
           connectionState: connection.connectionState,
           iceConnectionState: connection.iceConnectionState,
         });
+        if (connection.connectionState === "connected") {
+          void logSelectedCandidatePair(connection, participant.id).then((pair) => {
+            if (pair) setDebugCandidatePairs((current) => ({ ...current, [participant.id]: pair }));
+          });
+        }
         if (connection.connectionState === "connected") {
           setMediaState("connected");
           setError("");
@@ -819,11 +1014,21 @@ export default function LiveMediaRoom({
         }
       };
       connection.oniceconnectionstatechange = () => {
+        setDebugPeerStates((current) => ({
+          ...current,
+          [participant.id]: { connection: connection.connectionState, ice: connection.iceConnectionState },
+        }));
         logMedia("ICE connection state", {
           participantId: participant.id,
           state: connection.iceConnectionState,
           gatheringState: connection.iceGatheringState,
         });
+        if (connection.iceConnectionState === "connected" ||
+            connection.iceConnectionState === "completed") {
+          void logSelectedCandidatePair(connection, participant.id).then((pair) => {
+            if (pair) setDebugCandidatePairs((current) => ({ ...current, [participant.id]: pair }));
+          });
+        }
         if (connection.iceConnectionState === "failed") {
           const hasTurnRelay = iceServersRef.current.some((server) =>
             (Array.isArray(server.urls) ? server.urls : [server.urls])
@@ -904,13 +1109,34 @@ export default function LiveMediaRoom({
           const hasTurnRelay = result.iceServers.some((server) =>
             (Array.isArray(server.urls) ? server.urls : [server.urls])
               .some((url) => /^turns?:/i.test(url)));
-          logMedia("ICE configuration received", { serverCount: result.iceServers.length, hasTurnRelay });
-          if (!hasTurnRelay) console.warn("[live-class-media] No TURN relay is configured; some cross-network calls may fail.");
+          logMedia("ICE configuration received", {
+            serverCount: result.iceServers.length,
+            hasTurnRelay,
+            secureContext: window.isSecureContext,
+            pageProtocol: window.location.protocol,
+          });
+          setDebugIceConfig({ secureContext: window.isSecureContext, hasTurnRelay });
           iceConfigurationLogged = true;
         }
         const nextProfiles = new Map(result.participants.map((participant) => [participant.id, participant]));
         peerProfilesRef.current = nextProfiles;
         setParticipants(result.participants);
+        const permissionSnapshot = JSON.stringify({
+          localRole: role,
+          participants: result.participants.map((participant) => ({
+            id: participant.id,
+            role: participant.role,
+            canPublishVideo: true,
+            canPublishAudio: participant.role === "teacher" || participant.micAllowed,
+            canSubscribe: participant.id !== participantId,
+            microphoneAllowed: participant.micAllowed,
+          })),
+          permissionSource: "session authorization and server-enforced microphone allowance; no media token is used",
+        });
+        if (permissionSnapshotRef.current !== permissionSnapshot) {
+          permissionSnapshotRef.current = permissionSnapshot;
+          logMedia("media permissions", JSON.parse(permissionSnapshot) as Record<string, unknown>);
+        }
         const activePeerIds = new Set(
           result.participants.filter((participant) => participant.id !== participantId).map((participant) => participant.id),
         );
@@ -930,6 +1156,7 @@ export default function LiveMediaRoom({
         setError("");
       } catch (reason) {
         if (active) {
+          logMedia("peer media poll or signaling failed", { error: mediaError(reason, "Unknown media failure.") });
           setMediaState("failed");
           setError(mediaError(reason, "Live video could not connect. Retry by rejoining the class."));
         }
@@ -995,14 +1222,23 @@ export default function LiveMediaRoom({
       const track = stream?.getVideoTracks()[0] || currentTrack;
       if (enabled && !track) throw new Error("No camera was found.");
       if (track) track.enabled = enabled;
-      await Promise.all([...peerConnectionsRef.current.values()].map(({ videoSender }) =>
-        videoSender.replaceTrack(enabled ? track || null : null)));
+      try {
+        await Promise.all([...peerConnectionsRef.current.values()].map(({ videoSender }) =>
+          videoSender.replaceTrack(enabled ? track || null : null)));
+      } catch (reason) {
+        logMedia("local video track publication failed", {
+          action: enabled ? "enable" : "disable",
+          tracks: describeTracks(track ? new MediaStream([track]) : null),
+          error: mediaError(reason, "The camera track could not be updated."),
+        });
+        throw reason;
+      }
       cameraOnRef.current = enabled;
       setCameraOn(enabled);
       await heartbeatRef.current?.();
       setCameraError("");
       logMedia(enabled ? "camera published" : "camera unpublished", {
-        trackId: enabled ? track?.id : null,
+        tracks: describeTracks(enabled && track ? new MediaStream([track]) : null),
         peers: peerConnectionsRef.current.size,
       });
       setError("");
@@ -1025,8 +1261,14 @@ export default function LiveMediaRoom({
     screenStreamRef.current = null;
     screenOnRef.current = false;
     setScreenOn(false);
-    await Promise.all([...peerConnectionsRef.current.values()].map(({ screenSender }) =>
-      screenSender.replaceTrack(null)));
+    try {
+      await Promise.all([...peerConnectionsRef.current.values()].map(({ screenSender }) =>
+        screenSender.replaceTrack(null)));
+      logMedia("local screen track unpublished", { peers: peerConnectionsRef.current.size });
+    } catch (reason) {
+      logMedia("local screen track unpublication failed", { error: mediaError(reason, "Screen sharing could not stop.") });
+      throw reason;
+    }
     await heartbeatRef.current?.();
   }, []);
 
@@ -1037,14 +1279,24 @@ export default function LiveMediaRoom({
       const videoTrack = stream.getVideoTracks()[0];
       if (!videoTrack) throw new Error("Choose a screen or window to share.");
       screenStreamRef.current = stream;
-      await Promise.all([...peerConnectionsRef.current.values()].map(({ screenSender }) =>
-        screenSender.replaceTrack(videoTrack)));
+      try {
+        await Promise.all([...peerConnectionsRef.current.values()].map(({ screenSender }) =>
+          screenSender.replaceTrack(videoTrack)));
+      } catch (reason) {
+        logMedia("local screen track publication failed", {
+          tracks: describeTracks(stream),
+          error: mediaError(reason, "The shared screen could not be published."),
+        });
+        throw reason;
+      }
       videoTrack.addEventListener("ended", () => void stopScreenShare(), { once: true });
       screenOnRef.current = true;
       setScreenOn(true);
+      logMedia("local screen track published", { tracks: describeTracks(stream), peers: peerConnectionsRef.current.size });
       await heartbeatRef.current?.();
       setError("");
     } catch (reason) {
+      logMedia("screen share failed", { error: mediaError(reason, "The screen could not be shared.") });
       setError(mediaError(reason, "Your screen could not be shared."));
     }
   };
@@ -1096,6 +1348,7 @@ export default function LiveMediaRoom({
     participant.role !== "teacher" || teacherIsSharingScreen);
   const galleryScreen = localScreen || screenVideo?.stream || null;
   const galleryScreenName = localScreen ? "Your shared screen" : `${screenVideo?.name || teacherName}'s shared screen`;
+  const hasActiveRemoteTrack = remoteMedia.some((entry) => entry.active);
   const classroomClass = [
     styles.mediaClassroom,
     viewMode === "gallery" ? styles.galleryMode : "",
@@ -1108,6 +1361,36 @@ export default function LiveMediaRoom({
       entry.kind === "video" && entry.participantId === participant.id &&
       entry.source === "camera" && entry.active)?.stream || null;
   };
+  const debugRows = [
+    {
+      id: participantIdRef.current || "local",
+      name: "You",
+      video: trackStatus([cameraStreamRef.current, screenStreamRef.current], "video"),
+      audio: trackStatus([microphoneStreamRef.current], "audio"),
+      connection: "local",
+      ice: "local",
+    },
+    ...participants
+      .filter((participant) => participant.id !== participantIdRef.current)
+      .map((participant) => {
+        const peer = peerConnectionsRef.current.get(participant.id)?.connection;
+        const streams = remoteMedia
+          .filter((entry) => entry.participantId === participant.id)
+          .map((entry) => entry.stream);
+        const pair = debugCandidatePairs[participant.id];
+        return {
+          id: participant.id,
+          name: participant.name,
+          video: trackStatus(streams, "video"),
+          audio: trackStatus(streams, "audio"),
+          connection: debugPeerStates[participant.id]?.connection || peer?.connectionState || "not created",
+          ice: debugPeerStates[participant.id]?.ice || peer?.iceConnectionState || "not created",
+          candidatePair: pair
+            ? `${pair.localType}/${pair.remoteType} ${pair.protocol}`
+            : "not selected",
+        };
+      }),
+  ];
 
   return (
     <div className={classroomClass}>
@@ -1129,6 +1412,26 @@ export default function LiveMediaRoom({
         )}
       </div>
 
+      {debugEnabled && (
+        <aside className={styles.mediaDebugPanel} aria-label="Media diagnostics">
+          <strong>Media diagnostics</strong>
+          <span>
+            Secure context: {debugIceConfig ? (debugIceConfig.secureContext ? "yes" : "no") : "checking"} ·
+            TURN configured: {debugIceConfig ? (debugIceConfig.hasTurnRelay ? "yes" : "no") : "checking"}
+          </span>
+          {debugRows.map((row) => (
+            <div className={styles.mediaDebugRow} key={row.id}>
+              <strong>{row.name}</strong>
+              <span>Video: {row.video}</span>
+              <span>Audio: {row.audio}</span>
+              <span>Connection: {row.connection}</span>
+              <span>ICE: {row.ice}</span>
+              {"candidatePair" in row && <span>Candidate pair: {row.candidatePair}</span>}
+            </div>
+          ))}
+        </aside>
+      )}
+
       {viewMode === "speaker" ? (
         <>
           <div className={styles.mediaMain}>
@@ -1137,7 +1440,7 @@ export default function LiveMediaRoom({
                 stream={mainStream}
                 label={mainLabel}
                 className={styles.mediaMainVideo}
-                muted={Boolean(localScreen || teacher?.id === participantIdRef.current)}
+                muted
               />
               : (
                 <div className={styles.mediaPlaceholder}>
@@ -1166,7 +1469,7 @@ export default function LiveMediaRoom({
             )}
             <span className={styles.mediaConnection} role="status">
               {mediaState === "connected"
-                ? "Video connected"
+                ? hasActiveRemoteTrack ? "Media connected" : "Transport connected · waiting for media tracks"
                 : mediaState === "connecting"
                   ? "Connecting video…"
                   : mediaState === "failed"
@@ -1214,7 +1517,7 @@ export default function LiveMediaRoom({
           {galleryScreen && (
             <article className={styles.galleryScreenCard}>
               <div className={styles.participantVideo}>
-                <VideoView stream={galleryScreen} label={galleryScreenName} className={styles.participantVideoElement} muted={Boolean(localScreen)} />
+                <VideoView stream={galleryScreen} label={galleryScreenName} className={styles.participantVideoElement} muted />
               </div>
               <div className={styles.participantMeta}><strong>{galleryScreenName}</strong></div>
             </article>
@@ -1260,15 +1563,17 @@ export default function LiveMediaRoom({
           <span>{cameraOn ? "Stop video" : "Start video"}</span>
         </button>
         {isTeacher && classStatus === "live" && (
-          <button
-            className={`${styles.mediaControlButton} ${screenOn ? styles.mediaControlActive : ""}`}
-            type="button"
-            onClick={() => screenOn ? void stopScreenShare() : void shareScreen()}
-            aria-label={screenOn ? "Stop sharing screen" : "Share screen"}
-          >
-            <ControlIcon name="screen" />
-            <span>{screenOn ? "Stop share" : "Share screen"}</span>
-          </button>
+          screenSharingSupported
+            ? <button
+              className={`${styles.mediaControlButton} ${screenOn ? styles.mediaControlActive : ""}`}
+              type="button"
+              onClick={() => screenOn ? void stopScreenShare() : void shareScreen()}
+              aria-label={screenOn ? "Stop sharing screen" : "Share screen"}
+            >
+              <ControlIcon name="screen" />
+              <span>{screenOn ? "Stop share" : "Share screen"}</span>
+            </button>
+            : <span className={styles.mediaUnsupported}>Screen sharing is not available in this browser.</span>
         )}
         {isTeacher && classStatus === "live" && (
           <>
