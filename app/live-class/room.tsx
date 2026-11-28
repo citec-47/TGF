@@ -922,7 +922,7 @@ export default function LiveClassRoom() {
       {notice && <p className={`${styles.notice} livekit-recording-notice`} role="alert">{notice}</p>}
       {isTeacher && info.classStatus === "scheduled" && (
         <p className={`${styles.setupNote} livekit-recording-setup`}>
-          Your camera preview is on. Starting the class opens the browser recording picker; choose “This tab” and enable “Share tab audio.”
+          Your camera and microphone are ready. Recording starts automatically with the class.
         </p>
       )}
       {info.classStatus === "cancelled" && (

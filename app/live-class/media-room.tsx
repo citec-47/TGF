@@ -131,11 +131,19 @@ function VideoView({ stream, label, className }: { stream: MediaStream; label: s
     const video = videoRef.current;
     if (!video) return;
     video.srcObject = stream;
-    logMedia("video track attached", { label, streamId: stream.id, tracks: stream.getVideoTracks().length });
-    void video.play().catch((error: unknown) => {
+    const tracks = stream.getVideoTracks();
+    logMedia("video track attached", { label, streamId: stream.id, tracks: tracks.length });
+    const playVideo = () => void video.play().then(() => {
+      logMedia("video playback started", { label, readyState: video.readyState });
+    }).catch((error: unknown) => {
       logMedia("video playback blocked", { label, error: mediaError(error, "Playback was blocked.") });
     });
+    tracks.forEach((track) => track.addEventListener("unmute", playVideo));
+    video.addEventListener("loadedmetadata", playVideo);
+    playVideo();
     return () => {
+      tracks.forEach((track) => track.removeEventListener("unmute", playVideo));
+      video.removeEventListener("loadedmetadata", playVideo);
       video.srcObject = null;
     };
   }, [label, stream]);
@@ -152,11 +160,15 @@ function AudioView({ stream, participantName }: { stream: MediaStream; participa
     audio.muted = false;
     audio.volume = 1;
     logMedia("audio track attached", { participantName, streamId: stream.id, tracks: stream.getAudioTracks().length });
-    void audio.play().then(() => setNeedsGesture(false)).catch((error: unknown) => {
+    const playAudio = () => void audio.play().then(() => setNeedsGesture(false)).catch((error: unknown) => {
       setNeedsGesture(true);
       logMedia("audio playback blocked", { participantName, error: mediaError(error, "Playback requires a user gesture.") });
     });
+    const tracks = stream.getAudioTracks();
+    tracks.forEach((track) => track.addEventListener("unmute", playAudio));
+    playAudio();
     return () => {
+      tracks.forEach((track) => track.removeEventListener("unmute", playAudio));
       audio.srcObject = null;
     };
   }, [participantName, stream]);
@@ -203,6 +215,7 @@ export default function LiveMediaRoom({
   const [microphoneOn, setMicrophoneOn] = useState(false);
   const [microphoneAllowed, setMicrophoneAllowed] = useState(isTeacher);
   const [screenOn, setScreenOn] = useState(false);
+  const [classroomView, setClassroomView] = useState<"speaker" | "gallery">("speaker");
   const [mediaState, setMediaState] = useState<"connecting" | "connected" | "waiting" | "failed">(
     classStatus === "live" ? "connecting" : "waiting",
   );
@@ -901,7 +914,8 @@ export default function LiveMediaRoom({
     entry.kind === "video" && entry.source === "screen" && entry.active);
   const localScreen = screenOn ? screenStreamRef.current : null;
   const teacher = participants.find((participant) => participant.role === "teacher");
-  const teacherIsSharingScreen = Boolean(teacher?.screenOn || (isTeacher && screenOn));
+  const teacherIsSharingScreen = Boolean(localScreen ||
+    (screenVideo && screenVideo.participantId === teacher?.id));
   const teacherCamera = teacher?.id === participantIdRef.current
     ? (cameraOn ? localVideo : null)
     : remoteMedia.find((entry) =>
@@ -918,11 +932,64 @@ export default function LiveMediaRoom({
           : "Class camera preview";
   const stripParticipants = visibleParticipants.filter((participant) =>
     participant.role !== "teacher" || teacherIsSharingScreen);
+  const showGallery = classroomView === "gallery" && !localScreen && !screenVideo;
+  const galleryParticipants = visibleParticipants.map((participant) => {
+    const isSelf = participant.id === participantIdRef.current;
+    const remoteCamera = remoteMedia.find((entry) =>
+      entry.kind === "video" && entry.participantId === participant.id &&
+      entry.source === "camera" && entry.active)?.stream || null;
+    return {
+      participant,
+      stream: !participant.cameraOn
+        ? null
+        : isSelf ? (cameraOn ? localVideo : null) : remoteCamera,
+    };
+  });
 
   return (
     <div className={styles.mediaClassroom}>
-      <div className={styles.mediaMain}>
-        {mainStream
+      <div className={`${styles.mediaMain} ${showGallery ? styles.mediaMainGallery : ""}`}>
+        <div className={styles.mediaViewModes} role="group" aria-label="Video layout">
+          <button
+            className={`${styles.mediaViewButton} ${!showGallery ? styles.mediaViewButtonActive : ""}`}
+            type="button"
+            aria-pressed={!showGallery}
+            onClick={() => setClassroomView("speaker")}
+          >
+            Speaker
+          </button>
+          <button
+            className={`${styles.mediaViewButton} ${showGallery ? styles.mediaViewButtonActive : ""}`}
+            type="button"
+            aria-pressed={showGallery}
+            disabled={Boolean(localScreen || screenVideo)}
+            onClick={() => setClassroomView("gallery")}
+          >
+            Gallery
+          </button>
+        </div>
+        {showGallery ? (
+          <div className={styles.galleryGrid} aria-label="Class participant videos">
+            {galleryParticipants.map(({ participant, stream }) => (
+              <article className={styles.galleryTile} key={participant.id}>
+                <div className={styles.galleryVideo}>
+                  {stream
+                    ? <VideoView stream={stream} label={`${participant.name}'s camera`} className={styles.galleryVideoElement} />
+                    : <ParticipantAvatar name={participant.name} photoUrl={participant.profilePhotoUrl} gender={participant.gender} />}
+                  {!participant.cameraOn && <span className={styles.cameraOffIndicator}>Camera off</span>}
+                  {participant.cameraOn && !stream && <span className={styles.cameraOffIndicator}>Connecting video</span>}
+                  <strong className={styles.galleryName}>{participant.name}{participant.id === participantIdRef.current ? " (you)" : ""}</strong>
+                  <span className={styles.participantMic} aria-label={participant.microphoneOn ? "Microphone enabled" : "Microphone muted"}>
+                    {participant.microphoneOn ? "Mic on" : "Muted"}
+                  </span>
+                </div>
+              </article>
+            ))}
+            {galleryParticipants.length === 0 && (
+              <p className={styles.participantEmpty}>Participants will appear when they join.</p>
+            )}
+          </div>
+        ) : mainStream
           ? <VideoView stream={mainStream} label={mainLabel} className={styles.mediaMainVideo} />
           : (
             <div className={styles.mediaPlaceholder}>
@@ -952,7 +1019,7 @@ export default function LiveMediaRoom({
                 : "Waiting for participants"}
         </span>
       </div>
-      <aside className={styles.participantRail} aria-label="Class participants">
+      {!showGallery && <aside className={styles.participantRail} aria-label="Class participants">
         <div className={styles.participantRailHeader}>
           <strong>Participants</strong>
           <span>{stripParticipants.length}</span>
@@ -1008,7 +1075,7 @@ export default function LiveMediaRoom({
             </p>
           )}
         </div>
-      </aside>
+      </aside>}
       <div className={styles.mediaControls} role="group" aria-label="Classroom controls">
         <button
           className={`${styles.mediaControlButton} ${microphoneOn ? "" : styles.mediaControlOff}`}
