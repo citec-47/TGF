@@ -20,10 +20,12 @@ export interface RecordingQueueSession {
   nextRetryAt?: number;
   uploadLeaseUntil?: number;
   endClassPending?: boolean;
+  cancelClassPending?: boolean;
+  classWasLive?: boolean;
 }
 
 const DATABASE_NAME = "tgf-live-recording-queue";
-const DATABASE_VERSION = 2;
+const DATABASE_VERSION = 3;
 const CHUNKS_STORE = "chunks";
 const SESSIONS_STORE = "sessions";
 
@@ -94,27 +96,43 @@ export async function queueRecordingChunk(
     await new Promise<void>((resolve, reject) => {
       const transaction = database.transaction([CHUNKS_STORE, SESSIONS_STORE], "readwrite");
       const sessionStore = transaction.objectStore(SESSIONS_STORE);
-      transaction.objectStore(CHUNKS_STORE).put({
+      let failure: Error | DOMException | null = null;
+      const chunkRequest = transaction.objectStore(CHUNKS_STORE).put({
         key: chunkKey(sessionId, chunkNumber),
         sessionId,
         chunkNumber,
         elapsedSeconds,
         blob,
       } satisfies QueuedRecordingChunk);
+      chunkRequest.onerror = () => {
+        failure = chunkRequest.error;
+      };
       const sessionRequest = sessionStore.get(sessionId);
+      sessionRequest.onerror = () => {
+        failure = sessionRequest.error;
+      };
       sessionRequest.onsuccess = () => {
         const session = sessionRequest.result as RecordingQueueSession | undefined;
         if (!session) {
+          failure = new Error("The recording session is missing from local storage.");
           transaction.abort();
           return;
         }
         session.lastChunkNumber = Math.max(session.lastChunkNumber, chunkNumber);
         session.lastElapsedSeconds = Math.max(session.lastElapsedSeconds, elapsedSeconds);
-        sessionStore.put(session);
+        const updateRequest = sessionStore.put(session);
+        updateRequest.onerror = () => {
+          failure = updateRequest.error;
+        };
       };
       transaction.oncomplete = () => resolve();
-      transaction.onerror = () => reject(transaction.error || new Error("The recording chunk could not be saved locally."));
-      transaction.onabort = () => reject(transaction.error || new Error("The recording chunk could not be saved locally."));
+      const rejectWrite = () => {
+        failure ||= transaction.error;
+        const details = failure ? `${failure.name}: ${failure.message}` : "IndexedDB transaction aborted.";
+        reject(new Error(`The recording chunk could not be saved locally (${details}).`));
+      };
+      transaction.onerror = rejectWrite;
+      transaction.onabort = rejectWrite;
     });
   } finally {
     database.close();
@@ -241,7 +259,7 @@ export async function updateRecordingQueueSession(
   }
 }
 
-export async function claimRecordingQueueUpload(sessionId: string, leaseMilliseconds = 120_000): Promise<boolean> {
+export async function claimRecordingQueueUpload(sessionId: string, leaseMilliseconds = 900_000): Promise<boolean> {
   const database = await openDatabase();
   try {
     return await new Promise((resolve, reject) => {

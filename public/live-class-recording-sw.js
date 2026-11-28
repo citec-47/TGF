@@ -1,5 +1,5 @@
 const DATABASE_NAME = "tgf-live-recording-queue";
-const DATABASE_VERSION = 2;
+const DATABASE_VERSION = 3;
 const CHUNKS_STORE = "chunks";
 const SESSIONS_STORE = "sessions";
 const SYNC_TAG = "tgf-live-recording-upload";
@@ -7,6 +7,21 @@ const SYNC_TAG = "tgf-live-recording-upload";
 function openDatabase() {
   return new Promise((resolve, reject) => {
     const request = indexedDB.open(DATABASE_NAME, DATABASE_VERSION);
+    request.onupgradeneeded = () => {
+      const database = request.result;
+      if (!database.objectStoreNames.contains(CHUNKS_STORE)) {
+        const chunks = database.createObjectStore(CHUNKS_STORE, { keyPath: "key" });
+        chunks.createIndex("sessionId", "sessionId", { unique: false });
+      } else {
+        const transaction = request.transaction;
+        if (transaction && !transaction.objectStore(CHUNKS_STORE).indexNames.contains("sessionId")) {
+          transaction.objectStore(CHUNKS_STORE).createIndex("sessionId", "sessionId", { unique: false });
+        }
+      }
+      if (!database.objectStoreNames.contains(SESSIONS_STORE)) {
+        database.createObjectStore(SESSIONS_STORE, { keyPath: "sessionId" });
+      }
+    };
     request.onerror = () => reject(request.error || new Error("Recording storage is unavailable."));
     request.onsuccess = () => resolve(request.result);
   });
@@ -76,7 +91,7 @@ async function claimSession(sessionId) {
       request.onsuccess = () => {
         const session = request.result;
         if (!session || (session.uploadLeaseUntil || 0) > Date.now()) return;
-        session.uploadLeaseUntil = Date.now() + 120_000;
+        session.uploadLeaseUntil = Date.now() + 900_000;
         store.put(session);
         claimed = true;
       };
@@ -154,17 +169,18 @@ async function uploadSession(sessionId) {
     if (!session) return;
     if (!session.finalizePending) return;
     const chunks = await getChunks(sessionId);
-    if (session.endClassPending) {
-      if (chunks.length === 0) {
+    const endAction = session.cancelClassPending ? "cancel" : session.endClassPending ? "end" : null;
+    if (endAction) {
+      if (chunks.length === 0 && session.classWasLive) {
         await requestJson(`/api/collaboration/sessions/${encodeURIComponent(sessionId)}/start`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ recordingAvailable: false }),
         });
       }
-      await requestJson(`/api/collaboration/sessions/${encodeURIComponent(sessionId)}/end`, { method: "POST" });
-      session = await updateSession(sessionId, { endClassPending: false });
-      await notifyClients("class-ended", sessionId);
+      await requestJson(`/api/collaboration/sessions/${encodeURIComponent(sessionId)}/${endAction}`, { method: "POST" });
+      session = await updateSession(sessionId, { endClassPending: false, cancelClassPending: false });
+      await notifyClients(endAction === "cancel" ? "class-cancelled" : "class-ended", sessionId);
     }
     if ((session.nextRetryAt || 0) > Date.now()) return;
     await notifyClients("recording-uploading", sessionId);
@@ -183,7 +199,7 @@ async function uploadSession(sessionId) {
     let uploadResult = session.uploadConfirmed && uploadedBytes === file.size
       ? { public_id: signature.publicId, done: true }
       : null;
-    await updateSession(sessionId, { uploadId, uploadedBytes, mimeType, uploadLeaseUntil: Date.now() + 120_000 });
+    await updateSession(sessionId, { uploadId, uploadedBytes, mimeType, uploadLeaseUntil: Date.now() + 900_000 });
     const chunkSize = 6 * 1024 * 1024;
 
     while (uploadedBytes < file.size) {
@@ -215,7 +231,7 @@ async function uploadSession(sessionId) {
       await updateSession(sessionId, {
         uploadedBytes,
         uploadConfirmed: result.done === true && result.public_id === signature.publicId,
-        uploadLeaseUntil: Date.now() + 120_000,
+        uploadLeaseUntil: Date.now() + 900_000,
       });
     }
 
@@ -247,7 +263,7 @@ async function uploadSession(sessionId) {
 self.addEventListener("sync", (event) => {
   if (event.tag !== SYNC_TAG) return;
   event.waitUntil((async () => {
-    const sessions = await getSessions();
+    const sessions = (await getSessions()).sort((left, right) => left.startedAt - right.startedAt);
     let failed = false;
     for (const session of sessions) {
       if (!session.finalizePending) continue;

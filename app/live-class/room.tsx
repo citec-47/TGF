@@ -184,6 +184,15 @@ async function requestBackgroundRecordingSync() {
   }
 }
 
+async function requestPersistentRecordingStorage() {
+  try {
+    const persisted = await navigator.storage?.persist?.();
+    logLiveClass("persistent recording storage", { granted: Boolean(persisted) });
+  } catch (error) {
+    logLiveClass("persistent recording storage unavailable", { error: String(error) });
+  }
+}
+
 function formatDuration(totalSeconds: number): string {
   const minutes = Math.floor(totalSeconds / 60);
   const seconds = totalSeconds % 60;
@@ -511,18 +520,19 @@ export default function LiveClassRoom() {
       let session = await getRecordingQueueSession(sessionId);
       if (!session) return;
       const chunks = await getQueuedRecordingChunks(sessionId);
-      if (session.endClassPending) {
-        if (chunks.length === 0) {
+      const endAction = session.cancelClassPending ? "cancel" : session.endClassPending ? "end" : null;
+      if (endAction) {
+        if (chunks.length === 0 && session.classWasLive) {
           await requestJson(`/api/collaboration/sessions/${encodeURIComponent(sessionId)}/start`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ recordingAvailable: false }),
           });
         }
-        await requestJson(`/api/collaboration/sessions/${encodeURIComponent(sessionId)}/end`, { method: "POST" });
-        session = await updateRecordingQueueSession(sessionId, { endClassPending: false });
+        await requestJson(`/api/collaboration/sessions/${encodeURIComponent(sessionId)}/${endAction}`, { method: "POST" });
+        session = await updateRecordingQueueSession(sessionId, { endClassPending: false, cancelClassPending: false });
         if (sessionId === info?.sessionId) {
-          setInfo((current) => current ? { ...current, classStatus: "ended" } : current);
+          setInfo((current) => current ? { ...current, classStatus: endAction === "cancel" ? "cancelled" : "ended" } : current);
           setStatus("failed");
         }
       }
@@ -549,7 +559,7 @@ export default function LiveClassRoom() {
         uploadId,
         uploadedBytes,
         mimeType,
-        uploadLeaseUntil: Date.now() + 120_000,
+        uploadLeaseUntil: Date.now() + 900_000,
       });
       const chunkSize = 6 * 1024 * 1024;
       if (sessionId === info?.sessionId) {
@@ -586,7 +596,7 @@ export default function LiveClassRoom() {
         await updateRecordingQueueSession(sessionId, {
           uploadedBytes,
           uploadConfirmed: result.done === true && result.public_id === signature.publicId,
-          uploadLeaseUntil: Date.now() + 120_000,
+          uploadLeaseUntil: Date.now() + 900_000,
         });
         if (sessionId === info?.sessionId) setRecordingProgress(Math.round((end / file.size) * 100));
         logLiveClass("recording upload chunk confirmed", { sessionId, start, end });
@@ -639,7 +649,7 @@ export default function LiveClassRoom() {
     if (!info || info.role !== "teacher" || info.classStatus !== "live" || !recordingStream) return;
     let active = true;
     void getRecordingQueueSession(info.sessionId).then((session) => {
-      if (session?.endClassPending) return;
+      if (session?.endClassPending || session?.cancelClassPending) return;
       if (!active) return;
       return startBrowserRecording(info.sessionId, recordingStream);
     }).catch((error: unknown) => {
@@ -663,15 +673,18 @@ export default function LiveClassRoom() {
         setRecordedChunkCount(0);
         setNotice("Recording uploaded and confirmed.");
       }
-      if (event.data.type === "class-ended") {
-        setInfo((current) => current ? { ...current, classStatus: "ended" } : current);
+      if (event.data.type === "class-ended" || event.data.type === "class-cancelled") {
+        setInfo((current) => current ? {
+          ...current,
+          classStatus: event.data.type === "class-cancelled" ? "cancelled" : "ended",
+        } : current);
         setStatus("failed");
       }
     };
     const retryPendingRecordings = async () => {
       if (!navigator.onLine || !active) return;
       try {
-        const sessions = await getRecordingQueueSessions();
+        const sessions = (await getRecordingQueueSessions()).sort((left, right) => left.startedAt - right.startedAt);
         for (const session of sessions) {
           if (!active || !session.finalizePending ||
               (session.nextRetryAt || 0) > Date.now()) continue;
@@ -704,6 +717,7 @@ export default function LiveClassRoom() {
     try {
       void recordingAudioResumeRef.current?.().catch((error: unknown) =>
         logLiveClass("recording audio mixer could not resume", { error: String(error) }));
+      await requestPersistentRecordingStorage();
       await ensureRecordingQueueSession(info.sessionId);
       const result = await requestJson<{ recordingAvailable: boolean }>(
         `/api/collaboration/sessions/${encodeURIComponent(info.sessionId)}/start`, {
@@ -712,6 +726,7 @@ export default function LiveClassRoom() {
         body: JSON.stringify({ recordingAvailable: true }),
       });
       if (!result.recordingAvailable) throw new Error("The class started, but browser recording was not enabled. Try again or ask an administrator for help.");
+      await updateRecordingQueueSession(info.sessionId, { classWasLive: true });
       await refreshJoin(true);
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "The class could not be started.");
@@ -720,17 +735,70 @@ export default function LiveClassRoom() {
     }
   };
 
+  const finalizeAndUploadRecording = async (sessionId: string, action: "end" | "cancel") => {
+    await ensureRecordingQueueSession(sessionId);
+    const classWasLive = info?.classStatus === "live";
+    await updateRecordingQueueSession(sessionId, {
+      finalizePending: true,
+      endClassPending: action === "end",
+      cancelClassPending: action === "cancel",
+      classWasLive,
+    });
+    await stopBrowserRecording(sessionId);
+    await updateRecordingQueueSession(sessionId, {
+      finalizePending: true,
+      endClassPending: action === "end",
+      cancelClassPending: action === "cancel",
+      classWasLive,
+    });
+
+    const chunks = await getQueuedRecordingChunks(sessionId);
+    if (!navigator.onLine) {
+      setRecordingState(chunks.length ? "saved" : "idle");
+      setNotice(chunks.length
+        ? "Recording saved locally. Class finalization and Cloudinary upload will resume automatically online."
+        : "Class finalization is queued and will retry automatically online.");
+      await requestBackgroundRecordingSync();
+      return;
+    }
+
+    try {
+      if (chunks.length === 0 && classWasLive) {
+        await requestJson(`/api/collaboration/sessions/${encodeURIComponent(sessionId)}/start`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ recordingAvailable: false }),
+        });
+      }
+      await requestJson(`/api/collaboration/sessions/${encodeURIComponent(sessionId)}/${action}`, {
+        method: "POST",
+      });
+      await updateRecordingQueueSession(sessionId, { endClassPending: false, cancelClassPending: false });
+      setInfo((current) => current ? { ...current, classStatus: action === "cancel" ? "cancelled" : "ended" } : current);
+      setStatus("failed");
+      if (chunks.length) {
+        await uploadRecording(sessionId);
+      } else {
+        await clearRecordingQueueSession(sessionId);
+        setRecordingState("idle");
+      }
+    } catch (error) {
+      setRecordingState(chunks.length ? "saved" : "idle");
+      setNotice(chunks.length
+        ? "Recording saved locally. Class finalization and Cloudinary upload will retry automatically."
+        : "Class finalization is queued and will retry automatically.");
+      logLiveClass("class finalization queued", { sessionId, action, error: String(error) });
+    } finally {
+      await requestBackgroundRecordingSync();
+    }
+  };
+
   const cancelClass = async () => {
     if (!info || !window.confirm("Cancel this class for everyone?")) return;
     setBusy(true);
     setNotice("");
     try {
-      await requestJson(`/api/collaboration/sessions/${encodeURIComponent(info.sessionId)}/cancel`, {
-        method: "POST",
-      });
-      await stopBrowserRecording();
-      setInfo((current) => current ? { ...current, classStatus: "cancelled" } : current);
-      setStatus("failed");
+      await finalizeAndUploadRecording(info.sessionId, "cancel");
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "The class could not be cancelled.");
     } finally {
@@ -743,35 +811,9 @@ export default function LiveClassRoom() {
     setBusy(true);
     setNotice("");
     try {
-      await updateRecordingQueueSession(info.sessionId, { finalizePending: true, endClassPending: true });
-      await stopBrowserRecording(info.sessionId);
-      await updateRecordingQueueSession(info.sessionId, { finalizePending: true, endClassPending: true });
-      if ((await getQueuedRecordingChunks(info.sessionId)).length === 0) {
-        await requestJson(`/api/collaboration/sessions/${encodeURIComponent(info.sessionId)}/start`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ recordingAvailable: false }),
-        });
-      }
-      await requestBackgroundRecordingSync();
-      await requestJson(`/api/collaboration/sessions/${encodeURIComponent(info.sessionId)}/end`, {
-        method: "POST",
-      });
-      await updateRecordingQueueSession(info.sessionId, { endClassPending: false }).catch(() => undefined);
-      setInfo((current) => current ? { ...current, classStatus: "ended" } : current);
-      setStatus("failed");
-      void uploadRecording(info.sessionId);
-      void requestBackgroundRecordingSync();
+      await finalizeAndUploadRecording(info.sessionId, "end");
     } catch (error) {
-      const session = await getRecordingQueueSession(info.sessionId).catch(() => null);
-      if (session?.finalizePending) {
-        await updateRecordingQueueSession(info.sessionId, { endClassPending: true }).catch(() => undefined);
-        setRecordingState("saved");
-        setNotice("Recording saved locally. Class ending and upload will retry automatically when the connection returns.");
-        void requestBackgroundRecordingSync();
-      } else {
-        setNotice(error instanceof Error ? error.message : "The class could not be ended.");
-      }
+      setNotice(error instanceof Error ? error.message : "The class could not be ended.");
     } finally {
       setBusy(false);
     }
