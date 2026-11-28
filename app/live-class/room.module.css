@@ -312,11 +312,9 @@
   position: absolute;
   top: 58px;
   right: 14px;
-  bottom: auto;
   left: auto;
   z-index: 2;
   display: flex;
-  width: min(320px, calc(100% - 28px));
   max-width: min(320px, calc(100% - 28px));
   align-items: center;
   justify-content: center;
@@ -333,14 +331,12 @@
 
 .room .recordingControls p {
   margin: 0;
-  top: 18px;
+  font-size: 0.83rem;
   line-height: 1.45;
-  bottom: auto;
 }
 
 .room .recordingControls button {
-  width: auto;
-  max-width: min(320px, calc(100% - 28px));
+  border-color: rgba(255, 255, 255, 0.28);
   background: rgba(255, 255, 255, 0.1);
   color: #fff;
 }
@@ -355,10 +351,10 @@
 .room .sidebar {
   display: grid;
   min-width: 0;
-  gap: 8px;
-  padding: 8px 11px;
+  gap: 16px;
+}
 
-  border-radius: 999px;
+.room .roster,
 .room .chat {
   min-width: 0;
   overflow: hidden;
@@ -728,22 +724,9 @@
   }
 
   .room .recordingControls {
-    top: 48px;
+    top: 50px;
     right: 10px;
-    bottom: auto;
-    padding: 7px 9px;
-  }
-
-  .room .galleryGrid {
-    inset: 48px 8px 8px;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    grid-auto-rows: minmax(100px, auto);
-    align-content: start;
-    gap: 6px;
-  }
-
-  .room .galleryVideo {
-    min-height: 100px;
+    padding: 10px;
   }
 
   .room .sidebar {
@@ -814,14 +797,80 @@
   position: absolute;
   inset: 0;
   display: grid;
-  grid-template-rows: minmax(0, 1fr) auto auto;
+  grid-template-areas:
+    "view"
+    "main"
+    "rail"
+    "controls";
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr) minmax(100px, 22%) auto;
   overflow: hidden;
   background: #111719;
   color: #fff;
   text-align: left;
 }
 
+.room .viewControls {
+  grid-area: view;
+  z-index: 4;
+  display: flex;
+  min-width: 0;
+  min-height: 40px;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  padding: 4px 10px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  background: #151c1f;
+}
+
+.room .viewModeButtons {
+  display: inline-flex;
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 7px;
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.room .viewModeButtons button {
+  min-height: 28px;
+  padding: 4px 10px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.68);
+  font: inherit;
+  font-size: 0.68rem;
+  cursor: pointer;
+}
+
+.room .viewModeButtons button[aria-pressed="true"] {
+  background: #f3f6f3;
+  color: #17201c;
+  font-weight: 750;
+}
+
+.room .stripPositionControl {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: rgba(255, 255, 255, 0.7);
+  font-size: 0.66rem;
+}
+
+.room .stripPositionControl select {
+  min-height: 30px;
+  padding: 3px 8px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 5px;
+  background: #20282b;
+  color: #fff;
+  font: inherit;
+}
+
 .room .mediaMain {
+  grid-area: main;
   position: relative;
   display: grid;
   min-width: 0;
@@ -831,107 +880,6 @@
   background:
     radial-gradient(ellipse at 50% 35%, rgba(78, 101, 80, 0.25), transparent 48%),
     #111719;
-}
-
-.room .mediaMainGallery {
-  display: block;
-}
-
-.room .mediaViewModes {
-  position: absolute;
-  top: 12px;
-  left: 50%;
-  z-index: 4;
-  display: inline-flex;
-  gap: 2px;
-  padding: 3px;
-  border: 1px solid rgba(255, 255, 255, 0.18);
-  border-radius: 8px;
-  background: rgba(17, 24, 21, 0.88);
-  transform: translateX(-50%);
-}
-
-.room .mediaViewButton {
-  min-height: 30px;
-  padding: 0 10px;
-  border: 0;
-  border-radius: 5px;
-  background: transparent;
-  color: rgba(255, 255, 255, 0.74);
-  font: inherit;
-  font-size: 0.7rem;
-  font-weight: 700;
-  cursor: pointer;
-}
-
-.room .mediaViewButtonActive {
-  background: rgba(255, 255, 255, 0.17);
-  color: #fff;
-}
-
-.room .mediaViewButton:disabled {
-  cursor: not-allowed;
-  opacity: 0.5;
-}
-
-.room .galleryGrid {
-  position: absolute;
-  inset: 52px 12px 12px;
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr));
-  grid-auto-rows: minmax(160px, 1fr);
-  align-content: start;
-  gap: 10px;
-  overflow: auto;
-}
-
-.room .galleryTile {
-  min-width: 0;
-  min-height: 0;
-  overflow: hidden;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  border-radius: 8px;
-  background: #121719;
-}
-
-.room .galleryVideo {
-  position: relative;
-  display: grid;
-  width: 100%;
-  height: 100%;
-  min-height: 140px;
-  aspect-ratio: 16 / 9;
-  place-items: center;
-  overflow: hidden;
-  background: #121719;
-}
-
-.room .galleryVideoElement {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-}
-
-.room .galleryVideo > .participantAvatar,
-.room .galleryVideo > .participantInitial {
-  width: 48px;
-  height: 48px;
-  flex-basis: 48px;
-}
-
-.room .galleryName {
-  position: absolute;
-  bottom: 7px;
-  left: 7px;
-  max-width: calc(100% - 75px);
-  overflow: hidden;
-  padding: 4px 7px;
-  border-radius: 4px;
-  background: rgba(16, 20, 18, 0.78);
-  color: #fff;
-  font-size: 0.68rem;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .room .mediaMainVideo {
@@ -1003,7 +951,28 @@
   white-space: nowrap;
 }
 
+.room .mainMicIndicator {
+  position: absolute;
+  right: 14px;
+  bottom: 14px;
+  display: inline-flex;
+  min-height: 28px;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 8px;
+  border-radius: 6px;
+  background: rgba(18, 24, 21, 0.78);
+  color: #fff;
+  font-size: 0.68rem;
+}
+
+.room .mainMicIndicator svg {
+  width: 15px;
+  height: 15px;
+}
+
 .room .mediaControls {
+  grid-area: controls;
   z-index: 3;
   display: flex;
   min-width: 0;
@@ -1097,6 +1066,7 @@
 }
 
 .room .participantRail {
+  grid-area: rail;
   display: flex;
   min-width: 0;
   flex-direction: column;
@@ -1152,6 +1122,119 @@
   padding: 0 10px 9px;
   scrollbar-color: #536064 transparent;
   scrollbar-width: thin;
+}
+
+.room .audioViews {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  pointer-events: none;
+}
+
+.room .audioViews audio {
+  display: none;
+}
+
+.room .audioViews .audioEnableButton {
+  pointer-events: auto;
+}
+
+.room .galleryMode {
+  grid-template-areas:
+    "view"
+    "gallery"
+    "controls";
+  grid-template-rows: auto minmax(0, 1fr) auto;
+}
+
+.room .mediaGallery {
+  grid-area: gallery;
+  display: grid;
+  min-width: 0;
+  min-height: 0;
+  grid-template-columns: repeat(auto-fit, minmax(min(260px, 100%), 1fr));
+  align-content: start;
+  gap: 10px;
+  overflow: auto;
+  padding: 12px;
+  background: #111719;
+  scrollbar-color: #536064 transparent;
+  scrollbar-width: thin;
+}
+
+.room .mediaGallery .participantCard,
+.room .galleryScreenCard {
+  min-width: 0;
+  width: 100%;
+  flex: initial;
+}
+
+.room .galleryScreenCard {
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.055);
+}
+
+.room .activeSpeaker {
+  border-color: #53c28a;
+  box-shadow: inset 0 0 0 1px rgba(83, 194, 138, 0.65);
+}
+
+.room .strip_right,
+.room .strip_left {
+  grid-template-areas:
+    "view view"
+    "main rail"
+    "controls controls";
+  grid-template-columns: minmax(0, 1fr) minmax(150px, 24%);
+  grid-template-rows: auto minmax(0, 1fr) auto;
+}
+
+.room .strip_left {
+  grid-template-areas:
+    "view view"
+    "rail main"
+    "controls controls";
+}
+
+.room .strip_right .participantRail,
+.room .strip_left .participantRail {
+  border-top: 0;
+  border-left: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.room .strip_left .participantRail {
+  border-right: 1px solid rgba(255, 255, 255, 0.08);
+  border-left: 0;
+}
+
+.room .strip_right .participantList,
+.room .strip_left .participantList {
+  flex-direction: column;
+  overflow-x: hidden;
+  overflow-y: auto;
+  padding: 8px;
+}
+
+.room .strip_right .participantCard,
+.room .strip_left .participantCard {
+  width: 100%;
+  flex-basis: auto;
+}
+
+.room .strip_top {
+  grid-template-areas:
+    "view"
+    "rail"
+    "main"
+    "controls";
+  grid-template-rows: auto minmax(100px, 20%) minmax(0, 1fr) auto;
+}
+
+.room .strip_top .participantRail {
+  border-top: 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
 }
 
 .room .participantCard {
@@ -1275,11 +1358,66 @@
 
 @media (max-width: 680px) {
   .room .mediaClassroom {
-    grid-template-rows: minmax(0, 1fr) auto auto;
+    grid-template-rows: auto minmax(0, 1fr) minmax(92px, 24%) auto;
+  }
+
+  .room .viewControls {
+    min-height: 36px;
+    gap: 6px;
+    padding: 3px 6px;
+  }
+
+  .room .viewModeButtons button {
+    min-height: 27px;
+    padding: 4px 8px;
+    font-size: 0.62rem;
+  }
+
+  .room .stripPositionControl {
+    gap: 4px;
+    font-size: 0.6rem;
+  }
+
+  .room .stripPositionControl select {
+    min-height: 27px;
+    padding: 2px 5px;
+    font-size: 0.6rem;
+  }
+
+  .room .strip_right,
+  .room .strip_left {
+    grid-template-columns: minmax(0, 1fr) minmax(108px, 32%);
+    grid-template-rows: auto minmax(0, 1fr) auto;
+  }
+
+  .room .strip_right .participantRailHeader,
+  .room .strip_left .participantRailHeader {
+    justify-content: center;
+    padding: 4px;
+  }
+
+  .room .strip_right .participantSearch,
+  .room .strip_left .participantSearch {
+    display: none;
+  }
+
+  .room .strip_right .participantList,
+  .room .strip_left .participantList {
+    padding: 5px;
+  }
+
+  .room .galleryMode {
+    grid-template-rows: auto minmax(0, 1fr) auto;
+  }
+
+  .room .mediaGallery {
+    grid-template-columns: repeat(auto-fit, minmax(min(148px, 100%), 1fr));
+    gap: 6px;
+    padding: 7px;
   }
 
   .room .participantCard {
-    flex-basis: 128px;
+    flex-basis: 112px;
   }
 
   .room .mediaControls {

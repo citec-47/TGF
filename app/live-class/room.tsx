@@ -756,7 +756,7 @@ export default function LiveClassRoom() {
     if (!navigator.onLine) {
       setRecordingState(chunks.length ? "saved" : "idle");
       setNotice(chunks.length
-        ? "Recording saved locally. Class finalization and Cloudinary upload will resume automatically online."
+        ? "Recording saved locally. Upload and class finalization will resume automatically online."
         : "Class finalization is queued and will retry automatically online.");
       await requestBackgroundRecordingSync();
       return;
@@ -785,7 +785,7 @@ export default function LiveClassRoom() {
     } catch (error) {
       setRecordingState(chunks.length ? "saved" : "idle");
       setNotice(chunks.length
-        ? "Recording saved locally. Class finalization and Cloudinary upload will retry automatically."
+        ? "Recording saved locally. Upload and class finalization will retry automatically."
         : "Class finalization is queued and will retry automatically.");
       logLiveClass("class finalization queued", { sessionId, action, error: String(error) });
     } finally {
@@ -922,7 +922,7 @@ export default function LiveClassRoom() {
       {notice && <p className={`${styles.notice} livekit-recording-notice`} role="alert">{notice}</p>}
       {isTeacher && info.classStatus === "scheduled" && (
         <p className={`${styles.setupNote} livekit-recording-setup`}>
-          Your camera and microphone are ready. Recording starts automatically with the class.
+          Your camera preview is on. Starting the class opens the browser recording picker; choose “This tab” and enable “Share tab audio.”
         </p>
       )}
       {info.classStatus === "cancelled" && (

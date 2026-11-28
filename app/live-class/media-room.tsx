@@ -6,6 +6,10 @@ import styles from "./room.module.css";
 type ParticipantRole = "teacher" | "student";
 type MediaKind = "audio" | "video";
 type PeerSignalType = "offer" | "answer" | "candidate";
+type ViewMode = "speaker" | "gallery";
+type StripPosition = "right" | "left" | "top" | "bottom";
+
+const VIEW_PREFERENCES_KEY = "tgf-live-class-view-preferences";
 
 interface Participant {
   id: string;
@@ -125,29 +129,21 @@ export function ParticipantAvatar({
   return <span className={styles.participantInitial} aria-hidden="true">{name.trim().charAt(0).toUpperCase() || "?"}</span>;
 }
 
-function VideoView({ stream, label, className }: { stream: MediaStream; label: string; className: string }) {
+function VideoView({ stream, label, className, muted = false }: { stream: MediaStream; label: string; className: string; muted?: boolean }) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   useEffect(() => {
     const video = videoRef.current;
     if (!video) return;
     video.srcObject = stream;
-    const tracks = stream.getVideoTracks();
-    logMedia("video track attached", { label, streamId: stream.id, tracks: tracks.length });
-    const playVideo = () => void video.play().then(() => {
-      logMedia("video playback started", { label, readyState: video.readyState });
-    }).catch((error: unknown) => {
+    logMedia("video track attached", { label, streamId: stream.id, tracks: stream.getVideoTracks().length });
+    void video.play().catch((error: unknown) => {
       logMedia("video playback blocked", { label, error: mediaError(error, "Playback was blocked.") });
     });
-    tracks.forEach((track) => track.addEventListener("unmute", playVideo));
-    video.addEventListener("loadedmetadata", playVideo);
-    playVideo();
     return () => {
-      tracks.forEach((track) => track.removeEventListener("unmute", playVideo));
-      video.removeEventListener("loadedmetadata", playVideo);
       video.srcObject = null;
     };
   }, [label, stream]);
-  return <video ref={videoRef} className={className} autoPlay muted playsInline aria-label={label} />;
+  return <video ref={videoRef} className={className} autoPlay muted={muted} playsInline aria-label={label} />;
 }
 
 function AudioView({ stream, participantName }: { stream: MediaStream; participantName: string }) {
@@ -160,15 +156,11 @@ function AudioView({ stream, participantName }: { stream: MediaStream; participa
     audio.muted = false;
     audio.volume = 1;
     logMedia("audio track attached", { participantName, streamId: stream.id, tracks: stream.getAudioTracks().length });
-    const playAudio = () => void audio.play().then(() => setNeedsGesture(false)).catch((error: unknown) => {
+    void audio.play().then(() => setNeedsGesture(false)).catch((error: unknown) => {
       setNeedsGesture(true);
       logMedia("audio playback blocked", { participantName, error: mediaError(error, "Playback requires a user gesture.") });
     });
-    const tracks = stream.getAudioTracks();
-    tracks.forEach((track) => track.addEventListener("unmute", playAudio));
-    playAudio();
     return () => {
-      tracks.forEach((track) => track.removeEventListener("unmute", playAudio));
       audio.srcObject = null;
     };
   }, [participantName, stream]);
@@ -199,6 +191,53 @@ function AudioView({ stream, participantName }: { stream: MediaStream; participa
   );
 }
 
+function ParticipantTile({
+  participant,
+  stream,
+  isSelf,
+  isSpeaker,
+  canManageMicrophone,
+  onToggleMicrophone,
+}: {
+  participant: Participant;
+  stream: MediaStream | null;
+  isSelf: boolean;
+  isSpeaker: boolean;
+  canManageMicrophone: boolean;
+  onToggleMicrophone: () => void;
+}) {
+  const classes = [styles.participantCard, isSpeaker ? styles.activeSpeaker : ""].filter(Boolean).join(" ");
+  return (
+    <article className={classes} key={participant.id}>
+      <div className={styles.participantVideo}>
+        {stream
+          ? <VideoView stream={stream} label={`${participant.name}'s camera`} className={styles.participantVideoElement} muted={isSelf} />
+          : <ParticipantAvatar name={participant.name} photoUrl={participant.profilePhotoUrl} gender={participant.gender} />}
+        {participant.cameraOn && !stream && (
+          <span className={styles.cameraOffIndicator}>Connecting video</span>
+        )}
+        {!participant.cameraOn && (
+          <span className={styles.cameraOffIndicator} aria-label="Camera off">
+            <ControlIcon name="camera-off" /> Camera off
+          </span>
+        )}
+        <span className={styles.participantMic} aria-label={participant.microphoneOn ? "Microphone enabled" : "Microphone muted"}>
+          <ControlIcon name={participant.microphoneOn ? "microphone" : "microphone-off"} />
+          {participant.microphoneOn ? "Mic on" : "Muted"}
+        </span>
+      </div>
+      <div className={styles.participantMeta}>
+        <strong>{participant.name}{isSelf ? " (you)" : ""}</strong>
+        {canManageMicrophone && participant.role === "student" && (
+          <button type="button" onClick={onToggleMicrophone}>
+            {participant.micAllowed ? "Mute" : "Unmute"}
+          </button>
+        )}
+      </div>
+    </article>
+  );
+}
+
 export default function LiveMediaRoom({
   sessionId,
   role,
@@ -215,13 +254,16 @@ export default function LiveMediaRoom({
   const [microphoneOn, setMicrophoneOn] = useState(false);
   const [microphoneAllowed, setMicrophoneAllowed] = useState(isTeacher);
   const [screenOn, setScreenOn] = useState(false);
-  const [classroomView, setClassroomView] = useState<"speaker" | "gallery">("speaker");
   const [mediaState, setMediaState] = useState<"connecting" | "connected" | "waiting" | "failed">(
     classStatus === "live" ? "connecting" : "waiting",
   );
   const [error, setError] = useState("");
   const [cameraError, setCameraError] = useState("");
   const [participantSearch, setParticipantSearch] = useState("");
+  const [viewMode, setViewMode] = useState<ViewMode>("speaker");
+  const [stripPosition, setStripPosition] = useState<StripPosition>("bottom");
+  const [viewPreferencesLoaded, setViewPreferencesLoaded] = useState(false);
+  const [activeSpeakerId, setActiveSpeakerId] = useState<string | null>(null);
   const mediaUrl = `/api/collaboration/sessions/${encodeURIComponent(sessionId)}/media`;
   const participantIdRef = useRef("");
   const cameraStreamRef = useRef<MediaStream | null>(null);
@@ -236,6 +278,7 @@ export default function LiveMediaRoom({
   const heartbeatRef = useRef<(() => Promise<void>) | null>(null);
   const peerConnectionsRef = useRef(new Map<string, PeerConnectionState>());
   const peerProfilesRef = useRef(new Map<string, Participant>());
+  const participantsRef = useRef<Participant[]>(participants);
   const pendingCandidatesRef = useRef(new Map<string, RTCIceCandidateInit[]>());
   const initiatedOffersRef = useRef(new Set<string>());
   const iceServersRef = useRef<RTCIceServer[]>([]);
@@ -245,6 +288,35 @@ export default function LiveMediaRoom({
   const recordingAudioSourcesRef = useRef(new Map<string, MediaStreamAudioSourceNode>());
 
   remoteMediaRef.current = remoteMedia;
+  participantsRef.current = participants;
+
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem(VIEW_PREFERENCES_KEY);
+      if (saved) {
+        const preferences = JSON.parse(saved) as { viewMode?: ViewMode; stripPosition?: StripPosition };
+        if (preferences.viewMode === "speaker" || preferences.viewMode === "gallery") {
+          setViewMode(preferences.viewMode);
+        }
+        if (["right", "left", "top", "bottom"].includes(preferences.stripPosition || "")) {
+          setStripPosition(preferences.stripPosition as StripPosition);
+        }
+      }
+    } catch (reason) {
+      logMedia("view preferences could not be loaded", { error: String(reason) });
+    } finally {
+      setViewPreferencesLoaded(true);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!viewPreferencesLoaded) return;
+    try {
+      localStorage.setItem(VIEW_PREFERENCES_KEY, JSON.stringify({ viewMode, stripPosition }));
+    } catch (reason) {
+      logMedia("view preferences could not be saved", { error: String(reason) });
+    }
+  }, [stripPosition, viewMode, viewPreferencesLoaded]);
 
   const ensureCamera = useCallback(async () => {
     const currentTrack = cameraStreamRef.current?.getVideoTracks()[0];
@@ -296,7 +368,8 @@ export default function LiveMediaRoom({
   }, []);
 
   const setMicrophone = useCallback(async (enabled: boolean) => {
-    if (!isTeacher && !microphoneAllowedRef.current) {
+    const permitted = isTeacher || microphoneAllowedRef.current;
+    if (enabled && !permitted) {
       microphoneOnRef.current = false;
       setMicrophoneOn(false);
       return;
@@ -304,12 +377,17 @@ export default function LiveMediaRoom({
     const stream = await ensureMicrophone();
     const track = stream.getAudioTracks()[0];
     if (!track) throw new Error("No microphone was found.");
-    track.enabled = enabled;
+    const shouldPublish = enabled && permitted;
+    track.enabled = shouldPublish;
     await Promise.all([...peerConnectionsRef.current.values()].map(({ audioSender }) =>
-      audioSender.replaceTrack(track)));
-    logMedia("microphone published", { trackId: track.id, enabled, peers: peerConnectionsRef.current.size });
-    microphoneOnRef.current = enabled;
-    setMicrophoneOn(enabled);
+      audioSender.replaceTrack(shouldPublish ? track : null)));
+    logMedia(shouldPublish ? "microphone published" : "microphone unpublished", {
+      trackId: shouldPublish ? track.id : null,
+      permitted,
+      peers: peerConnectionsRef.current.size,
+    });
+    microphoneOnRef.current = shouldPublish;
+    setMicrophoneOn(shouldPublish);
     await heartbeatRef.current?.();
   }, [ensureMicrophone, isTeacher]);
 
@@ -501,15 +579,97 @@ export default function LiveMediaRoom({
   }, [classStatus, microphoneOn, remoteMedia]);
 
   useEffect(() => {
+    if (classStatus !== "live" || typeof window.AudioContext === "undefined") {
+      setActiveSpeakerId(null);
+      return;
+    }
+    const audioContext = new window.AudioContext();
+    const analyzers: Array<{
+      participantId: string;
+      analyzer: AnalyserNode;
+      source: MediaStreamAudioSourceNode;
+      silentSink: GainNode;
+    }> = [];
+    const localParticipantId = participantIdRef.current;
+    if (microphoneOn && localParticipantId && microphoneStreamRef.current) {
+      const source = audioContext.createMediaStreamSource(microphoneStreamRef.current);
+      const analyzer = audioContext.createAnalyser();
+      analyzer.fftSize = 512;
+      source.connect(analyzer);
+      const silentSink = audioContext.createGain();
+      silentSink.gain.value = 0;
+      analyzer.connect(silentSink);
+      silentSink.connect(audioContext.destination);
+      analyzers.push({ participantId: localParticipantId, analyzer, source, silentSink });
+    }
+    for (const entry of remoteMedia.filter((media) => media.kind === "audio")) {
+      const participant = participantsRef.current.find((profile) => profile.id === entry.participantId);
+      if (!participant?.microphoneOn || (participant.role === "student" && !participant.micAllowed)) continue;
+      const source = audioContext.createMediaStreamSource(entry.stream);
+      const analyzer = audioContext.createAnalyser();
+      analyzer.fftSize = 512;
+      source.connect(analyzer);
+      const silentSink = audioContext.createGain();
+      silentSink.gain.value = 0;
+      analyzer.connect(silentSink);
+      silentSink.connect(audioContext.destination);
+      analyzers.push({ participantId: participant.id, analyzer, source, silentSink });
+    }
+    if (analyzers.length === 0) {
+      setActiveSpeakerId(null);
+      void audioContext.close();
+      return;
+    }
+
+    void audioContext.resume().catch((reason: unknown) =>
+      logMedia("speaker meter audio context could not resume", { error: String(reason) }));
+    const sampleBuffers = analyzers.map(({ analyzer }) => new Uint8Array(analyzer.fftSize));
+    let lastVoiceAt = 0;
+    const timer = window.setInterval(() => {
+      let loudestParticipant = "";
+      let loudestLevel = 0;
+      analyzers.forEach(({ participantId, analyzer }, index) => {
+        const samples = sampleBuffers[index];
+        analyzer.getByteTimeDomainData(samples);
+        const sum = samples.reduce((total, value) => total + ((value - 128) / 128) ** 2, 0);
+        const level = Math.sqrt(sum / samples.length);
+        if (level > loudestLevel) {
+          loudestLevel = level;
+          loudestParticipant = participantId;
+        }
+      });
+      if (loudestLevel > 0.045) {
+        lastVoiceAt = Date.now();
+        setActiveSpeakerId((current) => current === loudestParticipant ? current : loudestParticipant);
+      } else if (Date.now() - lastVoiceAt > 900) {
+        setActiveSpeakerId((current) => current === null ? current : null);
+      }
+    }, 120);
+
+    return () => {
+      window.clearInterval(timer);
+      for (const { source, analyzer, silentSink } of analyzers) {
+        source.disconnect();
+        analyzer.disconnect();
+        silentSink.disconnect();
+      }
+      if (audioContext.state !== "closed") void audioContext.close();
+    };
+  }, [classStatus, microphoneOn, remoteMedia]);
+
+  useEffect(() => {
     for (const participant of participants) {
       peerProfilesRef.current.set(participant.id, participant);
     }
     setRemoteMedia((current) => current.map((entry) => {
       const participant = peerProfilesRef.current.get(entry.participantId);
-      if (!participant || entry.kind !== "video") return entry;
-      return entry.name === participant.name
-        ? entry
-        : { ...entry, name: participant.name };
+      if (!participant) return entry;
+      if (entry.kind === "audio") {
+        const track = entry.stream.getAudioTracks()[0];
+        const permitted = participant.role === "teacher" || participant.micAllowed;
+        if (track) track.enabled = permitted && participant.microphoneOn;
+      }
+      return entry.name === participant.name ? entry : { ...entry, name: participant.name };
     }));
     if (classStatus !== "live") return;
     const self = participants.find((participant) => participant.id === participantIdRef.current);
@@ -602,7 +762,9 @@ export default function LiveMediaRoom({
       const audioTransceiver = connection.addTransceiver("audio", { direction: "sendrecv" });
       const currentVideo = cameraOnRef.current ? camera?.getVideoTracks()[0] || null : null;
       const currentScreen = screenStreamRef.current?.getVideoTracks()[0] || null;
-      const currentAudio = microphone?.getAudioTracks()[0] || null;
+      const currentAudio = (isTeacher || microphoneAllowedRef.current) && microphoneOnRef.current
+        ? microphone?.getAudioTracks()[0] || null
+        : null;
       await videoTransceiver.sender.replaceTrack(currentVideo || null);
       await screenTransceiver.sender.replaceTrack(currentScreen);
       await audioTransceiver.sender.replaceTrack(currentAudio || null);
@@ -914,8 +1076,8 @@ export default function LiveMediaRoom({
     entry.kind === "video" && entry.source === "screen" && entry.active);
   const localScreen = screenOn ? screenStreamRef.current : null;
   const teacher = participants.find((participant) => participant.role === "teacher");
-  const teacherIsSharingScreen = Boolean(localScreen ||
-    (screenVideo && screenVideo.participantId === teacher?.id));
+  const teacherIsSharingScreen = Boolean(teacher?.screenOn || (isTeacher && screenOn));
+  const teacherMicrophoneOn = teacher?.id === participantIdRef.current ? microphoneOn : Boolean(teacher?.microphoneOn);
   const teacherCamera = teacher?.id === participantIdRef.current
     ? (cameraOn ? localVideo : null)
     : remoteMedia.find((entry) =>
@@ -932,150 +1094,151 @@ export default function LiveMediaRoom({
           : "Class camera preview";
   const stripParticipants = visibleParticipants.filter((participant) =>
     participant.role !== "teacher" || teacherIsSharingScreen);
-  const showGallery = classroomView === "gallery" && !localScreen && !screenVideo;
-  const galleryParticipants = visibleParticipants.map((participant) => {
-    const isSelf = participant.id === participantIdRef.current;
-    const remoteCamera = remoteMedia.find((entry) =>
+  const galleryScreen = localScreen || screenVideo?.stream || null;
+  const galleryScreenName = localScreen ? "Your shared screen" : `${screenVideo?.name || teacherName}'s shared screen`;
+  const classroomClass = [
+    styles.mediaClassroom,
+    viewMode === "gallery" ? styles.galleryMode : "",
+    viewMode === "speaker" ? styles[`strip_${stripPosition}`] : "",
+  ].filter(Boolean).join(" ");
+  const cameraForParticipant = (participant: Participant) => {
+    if (!participant.cameraOn) return null;
+    if (participant.id === participantIdRef.current) return cameraOn ? localVideo : null;
+    return remoteMedia.find((entry) =>
       entry.kind === "video" && entry.participantId === participant.id &&
       entry.source === "camera" && entry.active)?.stream || null;
-    return {
-      participant,
-      stream: !participant.cameraOn
-        ? null
-        : isSelf ? (cameraOn ? localVideo : null) : remoteCamera,
-    };
-  });
+  };
 
   return (
-    <div className={styles.mediaClassroom}>
-      <div className={`${styles.mediaMain} ${showGallery ? styles.mediaMainGallery : ""}`}>
-        <div className={styles.mediaViewModes} role="group" aria-label="Video layout">
-          <button
-            className={`${styles.mediaViewButton} ${!showGallery ? styles.mediaViewButtonActive : ""}`}
-            type="button"
-            aria-pressed={!showGallery}
-            onClick={() => setClassroomView("speaker")}
-          >
-            Speaker
-          </button>
-          <button
-            className={`${styles.mediaViewButton} ${showGallery ? styles.mediaViewButtonActive : ""}`}
-            type="button"
-            aria-pressed={showGallery}
-            disabled={Boolean(localScreen || screenVideo)}
-            onClick={() => setClassroomView("gallery")}
-          >
-            Gallery
-          </button>
+    <div className={classroomClass}>
+      <div className={styles.viewControls}>
+        <div className={styles.viewModeButtons} role="group" aria-label="Classroom view">
+          <button type="button" aria-pressed={viewMode === "speaker"} onClick={() => setViewMode("speaker")}>Speaker</button>
+          <button type="button" aria-pressed={viewMode === "gallery"} onClick={() => setViewMode("gallery")}>Gallery</button>
         </div>
-        {showGallery ? (
-          <div className={styles.galleryGrid} aria-label="Class participant videos">
-            {galleryParticipants.map(({ participant, stream }) => (
-              <article className={styles.galleryTile} key={participant.id}>
-                <div className={styles.galleryVideo}>
-                  {stream
-                    ? <VideoView stream={stream} label={`${participant.name}'s camera`} className={styles.galleryVideoElement} />
-                    : <ParticipantAvatar name={participant.name} photoUrl={participant.profilePhotoUrl} gender={participant.gender} />}
-                  {!participant.cameraOn && <span className={styles.cameraOffIndicator}>Camera off</span>}
-                  {participant.cameraOn && !stream && <span className={styles.cameraOffIndicator}>Connecting video</span>}
-                  <strong className={styles.galleryName}>{participant.name}{participant.id === participantIdRef.current ? " (you)" : ""}</strong>
-                  <span className={styles.participantMic} aria-label={participant.microphoneOn ? "Microphone enabled" : "Microphone muted"}>
-                    {participant.microphoneOn ? "Mic on" : "Muted"}
-                  </span>
-                </div>
-              </article>
-            ))}
-            {galleryParticipants.length === 0 && (
-              <p className={styles.participantEmpty}>Participants will appear when they join.</p>
-            )}
-          </div>
-        ) : mainStream
-          ? <VideoView stream={mainStream} label={mainLabel} className={styles.mediaMainVideo} />
-          : (
-            <div className={styles.mediaPlaceholder}>
-              <span className={styles.mediaAvatar}>
-                <ParticipantAvatar name={teacherName} photoUrl={teacher?.profilePhotoUrl || ""} gender={teacher?.gender || ""} />
-              </span>
-              <strong>{classStatus === "scheduled" ? "Your camera is ready" : mediaState === "failed" ? "Video unavailable" : "Waiting for video"}</strong>
-              <span>{cameraError || error || (isTeacher ? "Allow camera access to show your video." : "Your tutor's camera will appear here.")}</span>
-            </div>
-          )}
-        {(screenVideo || localScreen) && (
-          <span className={styles.screenShareBadge}>
-            {localScreen ? "Your screen is shared" : `Screen shared by ${screenVideo?.name}`}
-          </span>
+        {viewMode === "speaker" && (
+          <label className={styles.stripPositionControl}>
+            <span>Strip</span>
+            <select aria-label="Participant strip position" value={stripPosition} onChange={(event) => setStripPosition(event.target.value as StripPosition)}>
+              <option value="right">Right</option>
+              <option value="left">Left</option>
+              <option value="top">Top</option>
+              <option value="bottom">Bottom</option>
+            </select>
+          </label>
         )}
-        {!screenVideo && !localScreen && mainStream && <span className={styles.screenShareBadge}>{mainLabel}</span>}
+      </div>
+
+      {viewMode === "speaker" ? (
+        <>
+          <div className={styles.mediaMain}>
+            {mainStream
+              ? <VideoView
+                stream={mainStream}
+                label={mainLabel}
+                className={styles.mediaMainVideo}
+                muted={Boolean(localScreen || teacher?.id === participantIdRef.current)}
+              />
+              : (
+                <div className={styles.mediaPlaceholder}>
+                  <span className={styles.mediaAvatar}>
+                    <ParticipantAvatar name={teacherName} photoUrl={teacher?.profilePhotoUrl || ""} gender={teacher?.gender || ""} />
+                  </span>
+                  <strong>{classStatus === "scheduled" ? "Your camera is ready" : mediaState === "failed" ? "Video unavailable" : "Waiting for video"}</strong>
+                  <span>{cameraError || error || (isTeacher ? "Allow camera access to show your video." : "Your tutor's camera will appear here.")}</span>
+                </div>
+              )}
+            {(screenVideo || localScreen) && (
+              <span className={styles.screenShareBadge}>
+                {localScreen ? "Your screen is shared" : `Screen shared by ${screenVideo?.name}`}
+              </span>
+            )}
+            {!screenVideo && !localScreen && mainStream && (
+              <>
+                <span className={styles.screenShareBadge}>{mainLabel}</span>
+                {teacherStream && (
+                  <span className={styles.mainMicIndicator} aria-label={teacherMicrophoneOn ? "Tutor microphone on" : "Tutor microphone muted"}>
+                    <ControlIcon name={teacherMicrophoneOn ? "microphone" : "microphone-off"} />
+                    {teacherMicrophoneOn ? "Mic on" : "Muted"}
+                  </span>
+                )}
+              </>
+            )}
+            <span className={styles.mediaConnection} role="status">
+              {mediaState === "connected"
+                ? "Video connected"
+                : mediaState === "connecting"
+                  ? "Connecting video…"
+                  : mediaState === "failed"
+                    ? "Video unavailable"
+                    : "Waiting for participants"}
+            </span>
+          </div>
+          <aside className={styles.participantRail} aria-label="Class participants">
+            <div className={styles.participantRailHeader}>
+              <strong>Participants</strong>
+              <span>{stripParticipants.length}</span>
+              {isTeacher && (
+                <input
+                  className={styles.participantSearch}
+                  type="search"
+                  value={participantSearch}
+                  onChange={(event) => setParticipantSearch(event.target.value)}
+                  placeholder="Find a student"
+                  aria-label="Find a student"
+                />
+              )}
+            </div>
+            <div className={styles.participantList}>
+              {stripParticipants.map((participant) => (
+                <ParticipantTile
+                  key={participant.id}
+                  participant={participant}
+                  stream={cameraForParticipant(participant)}
+                  isSelf={participant.id === participantIdRef.current}
+                  isSpeaker={activeSpeakerId ? activeSpeakerId === participant.id : participant.role === "teacher"}
+                  canManageMicrophone={isTeacher && classStatus === "live"}
+                  onToggleMicrophone={() => void controlStudentMicrophone(participant.id, !participant.micAllowed)}
+                />
+              ))}
+              {stripParticipants.length === 0 && (
+                <p className={styles.participantEmpty}>
+                  {classStatus === "scheduled" ? "Participants will appear when the class starts." : "No other participants are here yet."}
+                </p>
+              )}
+            </div>
+          </aside>
+        </>
+      ) : (
+        <div className={styles.mediaGallery} aria-label="Gallery view">
+          {galleryScreen && (
+            <article className={styles.galleryScreenCard}>
+              <div className={styles.participantVideo}>
+                <VideoView stream={galleryScreen} label={galleryScreenName} className={styles.participantVideoElement} muted={Boolean(localScreen)} />
+              </div>
+              <div className={styles.participantMeta}><strong>{galleryScreenName}</strong></div>
+            </article>
+          )}
+          {participants.map((participant) => (
+            <ParticipantTile
+              key={participant.id}
+              participant={participant}
+              stream={cameraForParticipant(participant)}
+              isSelf={participant.id === participantIdRef.current}
+              isSpeaker={activeSpeakerId ? activeSpeakerId === participant.id : participant.role === "teacher"}
+              canManageMicrophone={isTeacher && classStatus === "live"}
+              onToggleMicrophone={() => void controlStudentMicrophone(participant.id, !participant.micAllowed)}
+            />
+          ))}
+          {participants.length === 0 && <p className={styles.participantEmpty}>Waiting for participants to join.</p>}
+        </div>
+      )}
+
+      <div className={styles.audioViews} aria-label="Remote participant audio">
         {remoteMedia.filter((entry) => entry.kind === "audio").map((entry) => (
           <AudioView key={`${entry.participantId}-${entry.kind}`} stream={entry.stream} participantName={entry.name} />
         ))}
-        <span className={styles.mediaConnection} role="status">
-          {mediaState === "connected"
-            ? "Video connected"
-            : mediaState === "connecting"
-              ? "Connecting video…"
-              : mediaState === "failed"
-                ? "Video unavailable"
-                : "Waiting for participants"}
-        </span>
       </div>
-      {!showGallery && <aside className={styles.participantRail} aria-label="Class participants">
-        <div className={styles.participantRailHeader}>
-          <strong>Participants</strong>
-          <span>{stripParticipants.length}</span>
-          {isTeacher && (
-            <input
-              className={styles.participantSearch}
-              type="search"
-              value={participantSearch}
-              onChange={(event) => setParticipantSearch(event.target.value)}
-              placeholder="Find a student"
-              aria-label="Find a student"
-            />
-          )}
-        </div>
-        <div className={styles.participantList}>
-          {stripParticipants.map((participant) => {
-            const isSelf = participant.id === participantIdRef.current;
-            const remoteCamera = remoteMedia.find((entry) =>
-              entry.kind === "video" && entry.participantId === participant.id &&
-              entry.source === "camera" && entry.active)?.stream || null;
-            const video = !participant.cameraOn
-              ? null
-              : isSelf ? (cameraOn ? localVideo : null) : remoteCamera;
-            return (
-              <article className={styles.participantCard} key={participant.id}>
-                <div className={styles.participantVideo}>
-                  {video
-                    ? <VideoView stream={video} label={`${participant.name}'s camera`} className={styles.participantVideoElement} />
-                    : <ParticipantAvatar name={participant.name} photoUrl={participant.profilePhotoUrl} gender={participant.gender} />}
-                  {!participant.cameraOn && <span className={styles.cameraOffIndicator}>Camera off</span>}
-                  {participant.cameraOn && !video && <span className={styles.cameraOffIndicator}>Connecting video</span>}
-                  <span className={styles.participantMic} aria-label={participant.microphoneOn ? "Microphone enabled" : "Microphone muted"}>
-                    {participant.microphoneOn ? "Mic on" : "Muted"}
-                  </span>
-                </div>
-                <div className={styles.participantMeta}>
-                  <strong>{participant.name}{isSelf ? " (you)" : ""}</strong>
-                  {participant.role === "student" && isTeacher && (
-                    <button
-                      type="button"
-                      onClick={() => void controlStudentMicrophone(participant.id, !participant.micAllowed)}
-                    >
-                      {participant.micAllowed ? "Mute" : "Unmute"}
-                    </button>
-                  )}
-                </div>
-              </article>
-            );
-          })}
-          {stripParticipants.length === 0 && (
-            <p className={styles.participantEmpty}>
-              {classStatus === "scheduled" ? "Participants will appear when the class starts." : "No other participants are here yet."}
-            </p>
-          )}
-        </div>
-      </aside>}
       <div className={styles.mediaControls} role="group" aria-label="Classroom controls">
         <button
           className={`${styles.mediaControlButton} ${microphoneOn ? "" : styles.mediaControlOff}`}
