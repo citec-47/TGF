@@ -2818,9 +2818,9 @@ async function handlePeerMediaRequest(
       cursor: signals.length ? signals[signals.length - 1].id : after,
       iceServers: [
         { urls: process.env.STUN_URL || "stun:stun.l.google.com:19302" },
-        ...(process.env.TURN_URL && process.env.TURN_USERNAME && process.env.TURN_CREDENTIAL
+        ...(process.env.TURN_URL?.trim() && process.env.TURN_USERNAME && process.env.TURN_CREDENTIAL
           ? [{
-            urls: process.env.TURN_URL,
+            urls: process.env.TURN_URL.split(",").map((url) => url.trim()).filter(Boolean),
             username: process.env.TURN_USERNAME,
             credential: process.env.TURN_CREDENTIAL,
           }]

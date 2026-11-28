@@ -12,10 +12,18 @@ export interface RecordingQueueSession {
   lastElapsedSeconds: number;
   startedAt: number;
   finalizePending: boolean;
+  mimeType?: string;
+  uploadId?: string;
+  uploadedBytes?: number;
+  uploadConfirmed?: boolean;
+  retryCount?: number;
+  nextRetryAt?: number;
+  uploadLeaseUntil?: number;
+  endClassPending?: boolean;
 }
 
 const DATABASE_NAME = "tgf-live-recording-queue";
-const DATABASE_VERSION = 1;
+const DATABASE_VERSION = 2;
 const CHUNKS_STORE = "chunks";
 const SESSIONS_STORE = "sessions";
 
@@ -24,9 +32,13 @@ function openDatabase(): Promise<IDBDatabase> {
     const request = indexedDB.open(DATABASE_NAME, DATABASE_VERSION);
     request.onupgradeneeded = () => {
       const database = request.result;
-      const chunks = database.createObjectStore(CHUNKS_STORE, { keyPath: "key" });
-      chunks.createIndex("sessionId", "sessionId", { unique: false });
-      database.createObjectStore(SESSIONS_STORE, { keyPath: "sessionId" });
+      if (!database.objectStoreNames.contains(CHUNKS_STORE)) {
+        const chunks = database.createObjectStore(CHUNKS_STORE, { keyPath: "key" });
+        chunks.createIndex("sessionId", "sessionId", { unique: false });
+      }
+      if (!database.objectStoreNames.contains(SESSIONS_STORE)) {
+        database.createObjectStore(SESSIONS_STORE, { keyPath: "sessionId" });
+      }
     };
     request.onsuccess = () => resolve(request.result);
     request.onerror = () => reject(request.error || new Error("The recording queue could not be opened."));
@@ -178,6 +190,75 @@ export async function getRecordingQueueSession(sessionId: string): Promise<Recor
       const request = transaction.objectStore(SESSIONS_STORE).get(sessionId);
       request.onsuccess = () => resolve((request.result as RecordingQueueSession | undefined) || null);
       request.onerror = () => reject(request.error || new Error("The recording queue session could not be loaded."));
+    });
+  } finally {
+    database.close();
+  }
+}
+
+export async function getRecordingQueueSessions(): Promise<RecordingQueueSession[]> {
+  const database = await openDatabase();
+  try {
+    return await new Promise((resolve, reject) => {
+      const transaction = database.transaction(SESSIONS_STORE, "readonly");
+      const request = transaction.objectStore(SESSIONS_STORE).getAll();
+      request.onsuccess = () => resolve(request.result as RecordingQueueSession[]);
+      request.onerror = () => reject(request.error || new Error("Pending recording sessions could not be loaded."));
+    });
+  } finally {
+    database.close();
+  }
+}
+
+export async function updateRecordingQueueSession(
+  sessionId: string,
+  updates: Partial<Omit<RecordingQueueSession, "sessionId">>,
+): Promise<RecordingQueueSession> {
+  const database = await openDatabase();
+  try {
+    return await new Promise((resolve, reject) => {
+      const transaction = database.transaction(SESSIONS_STORE, "readwrite");
+      const store = transaction.objectStore(SESSIONS_STORE);
+      let updated: RecordingQueueSession | null = null;
+      const request = store.get(sessionId);
+      request.onsuccess = () => {
+        const session = request.result as RecordingQueueSession | undefined;
+        if (!session) {
+          transaction.abort();
+          return;
+        }
+        updated = { ...session, ...updates };
+        store.put(updated);
+      };
+      transaction.oncomplete = () => updated
+        ? resolve(updated)
+        : reject(new Error("The recording queue session could not be updated."));
+      transaction.onerror = () => reject(transaction.error || new Error("The recording queue session could not be updated."));
+      transaction.onabort = () => reject(transaction.error || new Error("The recording queue session could not be updated."));
+    });
+  } finally {
+    database.close();
+  }
+}
+
+export async function claimRecordingQueueUpload(sessionId: string, leaseMilliseconds = 120_000): Promise<boolean> {
+  const database = await openDatabase();
+  try {
+    return await new Promise((resolve, reject) => {
+      const transaction = database.transaction(SESSIONS_STORE, "readwrite");
+      const store = transaction.objectStore(SESSIONS_STORE);
+      let claimed = false;
+      const request = store.get(sessionId);
+      request.onsuccess = () => {
+        const session = request.result as RecordingQueueSession | undefined;
+        if (!session || (session.uploadLeaseUntil || 0) > Date.now()) return;
+        session.uploadLeaseUntil = Date.now() + leaseMilliseconds;
+        store.put(session);
+        claimed = true;
+      };
+      transaction.oncomplete = () => resolve(claimed);
+      transaction.onerror = () => reject(transaction.error || new Error("The recording upload could not be claimed."));
+      transaction.onabort = () => reject(transaction.error || new Error("The recording upload could not be claimed."));
     });
   } finally {
     database.close();

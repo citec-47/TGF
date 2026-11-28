@@ -53,6 +53,8 @@ interface LiveMediaRoomProps {
   role: "teacher" | "learner";
   classStatus: "scheduled" | "live";
   teacherName: string;
+  onRecordingStream: (stream: MediaStream | null) => void;
+  onRecordingAudioResume: (resume: (() => Promise<void>) | null) => void;
 }
 
 async function requestMediaJson<T>(url: string, init?: RequestInit): Promise<T> {
@@ -74,6 +76,10 @@ async function requestMediaJson<T>(url: string, init?: RequestInit): Promise<T> 
 
 function mediaError(error: unknown, fallback: string): string {
   return error instanceof Error ? error.message : fallback;
+}
+
+function logMedia(event: string, details: Record<string, unknown> = {}) {
+  console.info("[live-class-media]", event, details);
 }
 
 function ControlIcon({ name }: { name: "microphone" | "microphone-off" | "camera" | "camera-off" | "screen" | "microphone-all" }) {
@@ -123,26 +129,60 @@ function VideoView({ stream, label, className }: { stream: MediaStream; label: s
     const video = videoRef.current;
     if (!video) return;
     video.srcObject = stream;
-    void video.play().catch(() => undefined);
+    logMedia("video track attached", { label, streamId: stream.id, tracks: stream.getVideoTracks().length });
+    void video.play().catch((error: unknown) => {
+      logMedia("video playback blocked", { label, error: mediaError(error, "Playback was blocked.") });
+    });
     return () => {
       video.srcObject = null;
     };
-  }, [stream]);
+  }, [label, stream]);
   return <video ref={videoRef} className={className} autoPlay muted playsInline aria-label={label} />;
 }
 
-function AudioView({ stream }: { stream: MediaStream }) {
+function AudioView({ stream, participantName }: { stream: MediaStream; participantName: string }) {
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  const [needsGesture, setNeedsGesture] = useState(false);
   useEffect(() => {
     const audio = audioRef.current;
     if (!audio) return;
     audio.srcObject = stream;
-    void audio.play().catch(() => undefined);
+    audio.muted = false;
+    audio.volume = 1;
+    logMedia("audio track attached", { participantName, streamId: stream.id, tracks: stream.getAudioTracks().length });
+    void audio.play().then(() => setNeedsGesture(false)).catch((error: unknown) => {
+      setNeedsGesture(true);
+      logMedia("audio playback blocked", { participantName, error: mediaError(error, "Playback requires a user gesture.") });
+    });
     return () => {
       audio.srcObject = null;
     };
-  }, [stream]);
-  return <audio ref={audioRef} autoPlay />;
+  }, [participantName, stream]);
+
+  const enableSound = async () => {
+    const audio = audioRef.current;
+    if (!audio) return;
+    audio.muted = false;
+    audio.volume = 1;
+    try {
+      await audio.play();
+      setNeedsGesture(false);
+      logMedia("audio playback enabled", { participantName });
+    } catch (error) {
+      logMedia("audio playback still blocked", { participantName, error: mediaError(error, "Playback remains blocked.") });
+    }
+  };
+
+  return (
+    <>
+      <audio ref={audioRef} autoPlay />
+      {needsGesture && (
+        <button className={styles.audioEnableButton} type="button" onClick={() => void enableSound()}>
+          Tap to enable sound
+        </button>
+      )}
+    </>
+  );
 }
 
 export default function LiveMediaRoom({
@@ -150,6 +190,8 @@ export default function LiveMediaRoom({
   role,
   classStatus,
   teacherName,
+  onRecordingStream,
+  onRecordingAudioResume,
 }: LiveMediaRoomProps) {
   const isTeacher = role === "teacher";
   const [participants, setParticipants] = useState<Participant[]>([]);
@@ -179,6 +221,12 @@ export default function LiveMediaRoom({
   const pendingCandidatesRef = useRef(new Map<string, RTCIceCandidateInit[]>());
   const initiatedOffersRef = useRef(new Set<string>());
   const iceServersRef = useRef<RTCIceServer[]>([]);
+  const remoteMediaRef = useRef<MediaStreamEntry[]>(remoteMedia);
+  const recordingAudioContextRef = useRef<AudioContext | null>(null);
+  const recordingAudioDestinationRef = useRef<MediaStreamAudioDestinationNode | null>(null);
+  const recordingAudioSourcesRef = useRef(new Map<string, MediaStreamAudioSourceNode>());
+
+  remoteMediaRef.current = remoteMedia;
 
   const ensureCamera = useCallback(async () => {
     if (cameraStreamRef.current) return cameraStreamRef.current;
@@ -196,6 +244,7 @@ export default function LiveMediaRoom({
     cameraOnRef.current = true;
     setCameraOn(true);
     setLocalVideo(stream);
+    logMedia("camera captured", { tracks: stream.getVideoTracks().map((track) => ({ id: track.id, readyState: track.readyState })) });
     return stream;
   }, []);
 
@@ -206,6 +255,7 @@ export default function LiveMediaRoom({
     const track = stream.getAudioTracks()[0];
     if (track) track.enabled = false;
     microphoneStreamRef.current = stream;
+    logMedia("microphone captured", { trackId: track?.id, readyState: track?.readyState });
     return stream;
   }, []);
 
@@ -221,6 +271,7 @@ export default function LiveMediaRoom({
     track.enabled = enabled;
     await Promise.all([...peerConnectionsRef.current.values()].map(({ audioSender }) =>
       audioSender.replaceTrack(track)));
+    logMedia("microphone published", { trackId: track.id, enabled, peers: peerConnectionsRef.current.size });
     microphoneOnRef.current = enabled;
     setMicrophoneOn(enabled);
     await heartbeatRef.current?.();
@@ -264,6 +315,134 @@ export default function LiveMediaRoom({
   }, [cameraOn, microphoneOn, screenOn]);
 
   useEffect(() => {
+    if (!isTeacher) {
+      onRecordingStream(null);
+      onRecordingAudioResume(null);
+      return;
+    }
+    const canvas = document.createElement("canvas");
+    canvas.width = 1280;
+    canvas.height = 720;
+    const context = canvas.getContext("2d");
+    const AudioContextConstructor = window.AudioContext;
+    if (!context || !AudioContextConstructor || typeof canvas.captureStream !== "function") {
+      logMedia("recording stream unavailable", { hasCanvasContext: Boolean(context), hasAudioContext: Boolean(AudioContextConstructor) });
+      onRecordingStream(null);
+      return;
+    }
+
+    const audioContext = new AudioContextConstructor();
+    const audioDestination = audioContext.createMediaStreamDestination();
+    const canvasStream = canvas.captureStream(15);
+    const recordingStream = new MediaStream([
+      ...canvasStream.getVideoTracks(),
+      ...audioDestination.stream.getAudioTracks(),
+    ]);
+    const videoElements = new Map<string, HTMLVideoElement>();
+    let active = true;
+    let frame = 0;
+
+    recordingAudioContextRef.current = audioContext;
+    recordingAudioDestinationRef.current = audioDestination;
+    onRecordingStream(recordingStream);
+    onRecordingAudioResume(async () => {
+      if (audioContext.state !== "closed") await audioContext.resume();
+    });
+    void audioContext.resume().then(() => {
+      logMedia("recording audio mixer ready", { state: audioContext.state });
+    }).catch((error: unknown) => {
+      logMedia("recording audio mixer resume failed", { error: mediaError(error, "Audio context could not resume.") });
+    });
+
+    const drawFrame = () => {
+      if (!active) return;
+      const localScreen = screenStreamRef.current;
+      const entries = localScreen
+        ? [{ key: "local-screen", name: "Tutor screen", stream: localScreen }]
+        : [
+          ...(cameraStreamRef.current && cameraOnRef.current
+            ? [{ key: "local-camera", name: isTeacher ? "Tutor" : "You", stream: cameraStreamRef.current }]
+            : []),
+          ...remoteMediaRef.current
+            .filter((entry) => entry.kind === "video")
+            .map((entry) => ({ key: entry.participantId, name: entry.name, stream: entry.stream })),
+        ];
+      context.fillStyle = "#101719";
+      context.fillRect(0, 0, canvas.width, canvas.height);
+      const columns = Math.max(1, Math.ceil(Math.sqrt(entries.length)));
+      const rows = Math.max(1, Math.ceil(entries.length / columns));
+      const tileWidth = canvas.width / columns;
+      const tileHeight = canvas.height / rows;
+
+      entries.forEach((entry, index) => {
+        let video = videoElements.get(entry.key);
+        if (!video) {
+          video = document.createElement("video");
+          video.autoplay = true;
+          video.muted = true;
+          video.playsInline = true;
+          video.srcObject = entry.stream;
+          videoElements.set(entry.key, video);
+          void video.play().catch((error: unknown) => {
+            logMedia("recording video playback failed", { participant: entry.name, error: mediaError(error, "Video could not play." ) });
+          });
+        } else if (video.srcObject !== entry.stream) {
+          video.srcObject = entry.stream;
+          void video.play().catch(() => undefined);
+        }
+        const x = (index % columns) * tileWidth;
+        const y = Math.floor(index / columns) * tileHeight;
+        if (video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA) {
+          context.drawImage(video, x, y, tileWidth, tileHeight);
+        }
+        context.fillStyle = "rgba(0, 0, 0, 0.62)";
+        context.fillRect(x + 12, y + tileHeight - 42, Math.min(tileWidth - 24, 260), 30);
+        context.fillStyle = "#fff";
+        context.font = "20px sans-serif";
+        context.fillText(entry.name, x + 22, y + tileHeight - 21, tileWidth - 44);
+      });
+      frame = window.requestAnimationFrame(drawFrame);
+    };
+    frame = window.requestAnimationFrame(drawFrame);
+
+    return () => {
+      active = false;
+      window.cancelAnimationFrame(frame);
+      for (const video of videoElements.values()) video.srcObject = null;
+      for (const source of recordingAudioSourcesRef.current.values()) source.disconnect();
+      recordingAudioSourcesRef.current.clear();
+      canvasStream.getTracks().forEach((track) => track.stop());
+      if (audioContext.state !== "closed") void audioContext.close();
+      recordingAudioContextRef.current = null;
+      recordingAudioDestinationRef.current = null;
+      onRecordingStream(null);
+      onRecordingAudioResume(null);
+    };
+  }, [isTeacher, onRecordingAudioResume, onRecordingStream]);
+
+  useEffect(() => {
+    const destination = recordingAudioDestinationRef.current;
+    const audioContext = recordingAudioContextRef.current;
+    if (classStatus !== "live" || !destination || !audioContext) return;
+    const streams = [
+      ...(microphoneStreamRef.current ? [microphoneStreamRef.current] : []),
+      ...remoteMedia.filter((entry) => entry.kind === "audio").map((entry) => entry.stream),
+    ];
+    const desiredIds = new Set(streams.map((stream) => stream.id));
+    for (const stream of streams) {
+      if (recordingAudioSourcesRef.current.has(stream.id)) continue;
+      const source = audioContext.createMediaStreamSource(stream);
+      source.connect(destination);
+      recordingAudioSourcesRef.current.set(stream.id, source);
+    }
+    for (const [streamId, source] of recordingAudioSourcesRef.current) {
+      if (desiredIds.has(streamId)) continue;
+      source.disconnect();
+      recordingAudioSourcesRef.current.delete(streamId);
+    }
+  }, [classStatus, microphoneOn, remoteMedia]);
+
+  useEffect(() => {
     for (const participant of participants) {
       peerProfilesRef.current.set(participant.id, participant);
     }
@@ -295,6 +474,7 @@ export default function LiveMediaRoom({
     let active = true;
     let pollTimer: number | undefined;
     let polling = false;
+    let iceConfigurationLogged = false;
     let cursor = 0;
     let lastHeartbeat = 0;
     const participantId = crypto.randomUUID();
@@ -353,6 +533,11 @@ export default function LiveMediaRoom({
       const currentAudio = microphone.getAudioTracks()[0];
       await videoTransceiver.sender.replaceTrack(currentVideo || null);
       await audioTransceiver.sender.replaceTrack(currentAudio || null);
+      logMedia("tracks published", {
+        participantId: participant.id,
+        videoTrackId: currentVideo?.id || null,
+        audioTrackId: currentAudio?.id || null,
+      });
       const peerState: PeerConnectionState = {
         connection,
         videoSender: videoTransceiver.sender,
@@ -367,16 +552,44 @@ export default function LiveMediaRoom({
       };
       connection.ontrack = (event) => {
         const profile = peerProfilesRef.current.get(participant.id) || participant;
+        logMedia("track subscribed", {
+          participantId: participant.id,
+          participantName: profile.name,
+          kind: event.track.kind,
+          trackId: event.track.id,
+          readyState: event.track.readyState,
+          streams: event.streams.length,
+        });
         upsertRemoteMedia(profile, event.track.kind === "video" ? "video" : "audio", event.track);
       };
       connection.onconnectionstatechange = () => {
         if (!active) return;
+        logMedia("peer connection state", {
+          participantId: participant.id,
+          connectionState: connection.connectionState,
+          iceConnectionState: connection.iceConnectionState,
+        });
         if (connection.connectionState === "connected") {
           setMediaState("connected");
           setError("");
         } else if (connection.connectionState === "failed") {
           setMediaState("failed");
           setError("A participant connection failed. This network may require a TURN relay.");
+        }
+      };
+      connection.oniceconnectionstatechange = () => {
+        logMedia("ICE connection state", {
+          participantId: participant.id,
+          state: connection.iceConnectionState,
+          gatheringState: connection.iceGatheringState,
+        });
+        if (connection.iceConnectionState === "failed") {
+          const hasTurnRelay = iceServersRef.current.some((server) =>
+            (Array.isArray(server.urls) ? server.urls : [server.urls])
+              .some((url) => /^turns?:/i.test(url)));
+          setError(hasTurnRelay
+            ? "The media connection failed. Check the relay service and network access."
+            : "The media connection failed. A configured TURN relay is required on some mobile and restricted networks.");
         }
       };
       return peerState;
@@ -446,6 +659,14 @@ export default function LiveMediaRoom({
         const result = await requestMediaJson<PeerMediaResponse>(`${mediaUrl}?${query.toString()}`);
         if (!active) return;
         iceServersRef.current = result.iceServers;
+        if (!iceConfigurationLogged) {
+          const hasTurnRelay = result.iceServers.some((server) =>
+            (Array.isArray(server.urls) ? server.urls : [server.urls])
+              .some((url) => /^turns?:/i.test(url)));
+          logMedia("ICE configuration received", { serverCount: result.iceServers.length, hasTurnRelay });
+          if (!hasTurnRelay) console.warn("[live-class-media] No TURN relay is configured; some cross-network calls may fail.");
+          iceConfigurationLogged = true;
+        }
         const nextProfiles = new Map(result.participants.map((participant) => [participant.id, participant]));
         peerProfilesRef.current = nextProfiles;
         setParticipants(result.participants);
@@ -640,7 +861,7 @@ export default function LiveMediaRoom({
         )}
         {!screenVideo && !localScreen && mainStream && <span className={styles.screenShareBadge}>{mainLabel}</span>}
         {remoteMedia.filter((entry) => entry.kind === "audio").map((entry) => (
-          <AudioView key={`${entry.participantId}-${entry.kind}`} stream={entry.stream} />
+          <AudioView key={`${entry.participantId}-${entry.kind}`} stream={entry.stream} participantName={entry.name} />
         ))}
         <span className={styles.mediaConnection} role="status">
           {mediaState === "connected"

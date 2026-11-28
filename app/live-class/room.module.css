@@ -348,18 +348,6 @@
   accent-color: var(--room-accent);
 }
 
-.room .recordingInstructions {
-  position: absolute;
-  right: 20px;
-  left: 20px;
-  bottom: 18px;
-  margin: 0;
-  color: rgba(255, 255, 255, 0.72);
-  font-size: 0.78rem;
-  line-height: 1.45;
-  text-align: center;
-}
-
 .room .sidebar {
   display: grid;
   min-width: 0;
@@ -741,13 +729,6 @@
     padding: 10px;
   }
 
-  .recordingInstructions {
-    right: 12px;
-    bottom: 13px;
-    left: 12px;
-    font-size: 0.7rem;
-  }
-
   .room .sidebar {
     grid-template-columns: minmax(0, 1fr);
   }
@@ -810,15 +791,6 @@
   .room .status_reconnecting > span {
     animation: none;
   }
-}
-
-.room .capturePreview {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  overflow: hidden;
-  opacity: 0;
-  pointer-events: none;
 }
 
 .room .mediaClassroom {
@@ -987,6 +959,23 @@
   background: rgba(20, 29, 25, 0.78);
   color: rgba(255, 255, 255, 0.84);
   font-size: 0.66rem;
+}
+
+.room .audioEnableButton {
+  position: absolute;
+  right: 16px;
+  bottom: 56px;
+  z-index: 4;
+  min-height: 38px;
+  padding: 0 12px;
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  border-radius: 6px;
+  background: #f5f7f4;
+  color: #18211c;
+  font: inherit;
+  font-size: 0.8rem;
+  font-weight: 700;
+  cursor: pointer;
 }
 
 .room .participantRail {

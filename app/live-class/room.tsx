@@ -3,12 +3,15 @@
 import { useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import {
+  claimRecordingQueueUpload,
   clearRecordingQueueSession,
   ensureRecordingQueueSession,
   getQueuedRecordingChunks,
   getRecordingQueueSession,
+  getRecordingQueueSessions,
   markRecordingQueueFinalizing,
   queueRecordingChunk,
+  updateRecordingQueueSession,
 } from "./recording-queue";
 import LiveMediaRoom, { ParticipantAvatar } from "./media-room";
 import styles from "./room.module.css";
@@ -168,6 +171,19 @@ async function requestJson<T>(url: string, init?: RequestInit): Promise<T> {
   return result;
 }
 
+async function requestBackgroundRecordingSync() {
+  if (!("serviceWorker" in navigator)) return;
+  try {
+    const registration = await navigator.serviceWorker.ready;
+    const syncRegistration = registration as ServiceWorkerRegistration & {
+      sync?: { register: (tag: string) => Promise<void> };
+    };
+    await syncRegistration.sync?.register("tgf-live-recording-upload");
+  } catch (error) {
+    logLiveClass("background recording sync unavailable", { error: String(error) });
+  }
+}
+
 function formatDuration(totalSeconds: number): string {
   const minutes = Math.floor(totalSeconds / 60);
   const seconds = totalSeconds % 60;
@@ -199,28 +215,23 @@ export default function LiveClassRoom() {
   const [messageBody, setMessageBody] = useState("");
   const [chatError, setChatError] = useState("");
   const [busy, setBusy] = useState(false);
-  const [recordingState, setRecordingState] = useState<"idle" | "recording" | "uploading" | "ready" | "failed">("idle");
-  const [periodicUploadState, setPeriodicUploadState] = useState<"idle" | "uploading" | "saved" | "failed">("idle");
+  const [recordingState, setRecordingState] = useState<"idle" | "recording" | "saved" | "uploading" | "ready" | "failed">("idle");
   const [recordingProgress, setRecordingProgress] = useState(0);
   const [recordedChunkCount, setRecordedChunkCount] = useState(0);
-  const [recordingStopped, setRecordingStopped] = useState(false);
-  const [captureStream, setCaptureStream] = useState<MediaStream | null>(null);
+  const [recordingStream, setRecordingStream] = useState<MediaStream | null>(null);
   const [recordingDuration, setRecordingDuration] = useState(0);
-  const recordingPreview = useRef<HTMLVideoElement | null>(null);
   const recorderRef = useRef<MediaRecorder | null>(null);
   const uploadInProgressRef = useRef(false);
-  const uploadRecordingRef = useRef<((finalize?: boolean) => Promise<void>) | null>(null);
-  const periodicUploadTimerRef = useRef<number | null>(null);
-  const periodicUploadTaskRef = useRef<Promise<void> | null>(null);
+  const uploadRecordingRef = useRef<((sessionId: string) => Promise<void>) | null>(null);
+  const recordingAudioResumeRef = useRef<(() => Promise<void>) | null>(null);
   const stopRecordingPromiseRef = useRef<Promise<void> | null>(null);
-  const recordingStatusUpdateRef = useRef<Promise<void>>(Promise.resolve());
-  const captureStreamRef = useRef<MediaStream | null>(null);
-  const microphoneStreamRef = useRef<MediaStream | null>(null);
-  const audioContextRef = useRef<AudioContext | null>(null);
   const chunkWritesRef = useRef<Promise<void>>(Promise.resolve());
   const nextChunkNumberRef = useRef(1);
   const recordingStartedAtRef = useRef(0);
-  const intentionalStopTracksRef = useRef(new WeakSet<MediaStreamTrack>());
+
+  const setRecordingAudioResume = useCallback((resume: (() => Promise<void>) | null) => {
+    recordingAudioResumeRef.current = resume;
+  }, []);
 
   const refreshJoin = useCallback(async (force = false) => {
     const result = await requestJson<JoinResponse>(joinUrl, {
@@ -371,13 +382,20 @@ export default function LiveClassRoom() {
     ]).then(([session, chunks]) => {
       if (!active || !session || chunks.length === 0) return;
       setRecordedChunkCount(chunks.length);
-      setRecordingStopped(true);
       nextChunkNumberRef.current = session.lastChunkNumber + 1;
       recordingStartedAtRef.current = session.startedAt;
       setRecordingDuration(session.lastElapsedSeconds);
-      if (info.classStatus === "ended" || info.classStatus === "cancelled") {
-        setRecordingState("failed");
-        setNotice("A browser recording is saved locally and can be uploaded from this page.");
+      if (session.finalizePending || info.classStatus === "ended" || info.classStatus === "cancelled") {
+        if (!session.finalizePending && info.classStatus === "ended") {
+          void markRecordingQueueFinalizing(info.sessionId).then(() => {
+            void uploadRecordingRef.current?.(info.sessionId);
+            void requestBackgroundRecordingSync();
+          }).catch((error: unknown) => logLiveClass("recovered recording finalization failed", { error: String(error) }));
+        }
+        if (!uploadInProgressRef.current) {
+          setRecordingState((session.uploadLeaseUntil || 0) > Date.now() ? "uploading" : "saved");
+        }
+        setNotice("Recording saved locally. Upload will resume automatically when a connection is available.");
       }
     }).catch((error: unknown) => {
       if (active) setNotice(error instanceof Error ? error.message : "Saved recording data could not be checked.");
@@ -386,16 +404,6 @@ export default function LiveClassRoom() {
       active = false;
     };
   }, [info?.classStatus, info?.role, info?.sessionId]);
-
-  useEffect(() => {
-    if (recordingPreview.current) recordingPreview.current.srcObject = captureStream;
-  }, [captureStream, info?.classStatus]);
-
-  useEffect(() => () => {
-    if (periodicUploadTimerRef.current !== null) {
-      window.clearInterval(periodicUploadTimerRef.current);
-    }
-  }, []);
 
   useEffect(() => {
     if (recordingState !== "recording") return;
@@ -413,188 +421,73 @@ export default function LiveClassRoom() {
     };
   }, [recordingState]);
 
-  const startBrowserRecording = async (sessionId: string) => {
-    if (typeof MediaRecorder === "undefined" || !navigator.mediaDevices?.getDisplayMedia) {
-      throw new Error("This browser cannot record a shared tab. Use a recent version of Chrome or Edge over HTTPS.");
-    }
+  const startBrowserRecording = async (sessionId: string, stream: MediaStream) => {
+    if (typeof MediaRecorder === "undefined") throw new Error("This browser does not support class recording.");
     if (recorderRef.current?.state === "recording") return;
-
-    let displayStream: MediaStream;
-    try {
-      displayStream = await navigator.mediaDevices.getDisplayMedia({
-        video: { frameRate: { ideal: 15, max: 30 } },
-        audio: true,
-        preferCurrentTab: true,
-      } as DisplayMediaStreamOptions);
-    } catch (error) {
-      if (error instanceof DOMException && error.name === "NotAllowedError") {
-        throw new Error("Screen sharing was cancelled or denied. Allow sharing and choose this tab to record it.");
-      }
-      if (error instanceof DOMException && error.name === "NotFoundError") {
-        throw new Error("No screen or tab is available to record.");
-      }
-      throw new Error(error instanceof Error ? error.message : "The browser could not start screen recording.");
+    const queueSession = await ensureRecordingQueueSession(sessionId);
+    if (queueSession.finalizePending && info?.classStatus === "live") {
+      await updateRecordingQueueSession(sessionId, { finalizePending: false });
     }
+    const supportedTypes = [
+      "video/mp4",
+      "video/webm;codecs=vp9,opus",
+      "video/webm;codecs=vp8,opus",
+      "video/webm",
+    ];
+    const mimeType = supportedTypes.find((type) => MediaRecorder.isTypeSupported(type));
+    const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
+    chunkWritesRef.current = Promise.resolve();
+    nextChunkNumberRef.current = queueSession.lastChunkNumber + 1;
+    recordingStartedAtRef.current = queueSession.startedAt;
+    setRecordingDuration(queueSession.lastElapsedSeconds);
+    setRecordedChunkCount(queueSession.lastChunkNumber);
+    setNotice("");
 
-    let microphone: MediaStream | null = null;
-    let audioContext: AudioContext | null = null;
-    try {
-      microphone = await navigator.mediaDevices.getUserMedia({ audio: true });
-    } catch (error) {
-      setNotice("Microphone access was denied. The recording will include shared-tab audio only.");
-      logLiveClass("microphone unavailable", { sessionId, error: String(error) });
-    }
-
-    try {
-      const queueSession = await ensureRecordingQueueSession(sessionId);
-      audioContext = new AudioContext();
-      await audioContext.resume();
-      const audioDestination = audioContext.createMediaStreamDestination();
-      let audioSources = 0;
-      for (const stream of [displayStream, microphone].filter((value): value is MediaStream => value !== null)) {
-        if (stream.getAudioTracks().length > 0) {
-          audioContext.createMediaStreamSource(stream).connect(audioDestination);
-          audioSources += 1;
-        }
-      }
-      if (audioSources === 0) {
-        setNotice("No shared-tab audio or microphone was captured. Check the browser's tab-audio sharing option.");
-      }
-
-      const mixedStream = new MediaStream([
-        ...displayStream.getVideoTracks(),
-        ...audioDestination.stream.getAudioTracks(),
-      ]);
-      const supportedTypes = [
-        "video/webm;codecs=vp9,opus",
-        "video/webm;codecs=vp8,opus",
-        "video/webm",
-      ];
-      const mimeType = supportedTypes.find((type) => MediaRecorder.isTypeSupported(type));
-      const recorder = new MediaRecorder(mixedStream, mimeType ? { mimeType } : undefined);
-
-      captureStreamRef.current = displayStream;
-      microphoneStreamRef.current = microphone;
-      audioContextRef.current = audioContext;
-      chunkWritesRef.current = Promise.resolve();
-      nextChunkNumberRef.current = queueSession.lastChunkNumber + 1;
-      recordingStartedAtRef.current = queueSession.startedAt;
-      setRecordingDuration(queueSession.lastElapsedSeconds);
-      setCaptureStream(displayStream);
-      setRecordedChunkCount(queueSession.lastChunkNumber);
-      setNotice("");
-
-      recorder.ondataavailable = (event: BlobEvent) => {
-        if (event.data.size === 0) return;
-        const chunkNumber = nextChunkNumberRef.current++;
-        const elapsedSeconds = Math.floor((Date.now() - queueSession.startedAt) / 1000);
-        chunkWritesRef.current = chunkWritesRef.current.then(async () => {
-          await queueRecordingChunk(sessionId, chunkNumber, elapsedSeconds, event.data);
-          setRecordedChunkCount(chunkNumber);
-          logLiveClass("recording chunk saved", { sessionId, chunkNumber, bytes: event.data.size });
-        }).catch((error: unknown) => {
-          setNotice(error instanceof Error ? error.message : "A recording chunk could not be saved locally.");
-          logLiveClass("recording chunk save failed", { sessionId, chunkNumber, error: String(error) });
-        });
-      };
-      recorder.onerror = (event: Event) => {
+    recorder.ondataavailable = (event: BlobEvent) => {
+      if (event.data.size === 0) return;
+      const chunkNumber = nextChunkNumberRef.current++;
+      const elapsedSeconds = Math.floor((Date.now() - queueSession.startedAt) / 1000);
+      chunkWritesRef.current = chunkWritesRef.current.then(async () => {
+        await queueRecordingChunk(sessionId, chunkNumber, elapsedSeconds, event.data);
+        await updateRecordingQueueSession(sessionId, { mimeType: recorder.mimeType });
+        setRecordedChunkCount(chunkNumber);
+        logLiveClass("recording chunk persisted", { sessionId, chunkNumber, bytes: event.data.size });
+      }).catch((error: unknown) => {
         setRecordingState("failed");
-        setNotice("The browser recording encountered an error. Keep this page open and retry from the saved recording.");
-        logLiveClass("MediaRecorder error", { sessionId, error: String(event) });
-      };
-      const displayVideoTrack = displayStream.getVideoTracks()[0];
-      displayVideoTrack?.addEventListener("ended", () => {
-        if (intentionalStopTracksRef.current.has(displayVideoTrack)) return;
-        recordingStatusUpdateRef.current = stopBrowserRecording().then(async () => {
-          await requestJson(`/api/collaboration/sessions/${encodeURIComponent(sessionId)}/start`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ recordingAvailable: false }),
-          });
-          setRecordingStopped(true);
-          setInfo((current) => current ? { ...current, recordingStatus: "pending" } : current);
-          setNotice("Screen sharing stopped. The saved recording will upload when the class ends.");
-        }).catch((error: unknown) => {
-          setNotice(error instanceof Error ? error.message : "The stopped recording could not be saved.");
-        });
-      }, { once: true });
-      recorderRef.current = recorder;
-      recorder.start(5000);
-      if (periodicUploadTimerRef.current !== null) {
-        window.clearInterval(periodicUploadTimerRef.current);
-      }
-      setPeriodicUploadState("idle");
-      periodicUploadTimerRef.current = window.setInterval(() => {
-        if (periodicUploadTaskRef.current || !uploadRecordingRef.current) return;
-        const task = uploadRecordingRef.current(false);
-        periodicUploadTaskRef.current = task;
-        void task.finally(() => {
-          if (periodicUploadTaskRef.current === task) periodicUploadTaskRef.current = null;
-        });
-      }, 30000);
-      setRecordingStopped(false);
-      setRecordingState("recording");
-      logLiveClass("browser recording started", { sessionId, mimeType: recorder.mimeType });
-    } catch (error) {
-      recorderRef.current = null;
-      captureStreamRef.current = null;
-      microphoneStreamRef.current = null;
-      setCaptureStream(null);
-      setRecordingState("idle");
-      displayStream.getTracks().forEach((track) => {
-        intentionalStopTracksRef.current.add(track);
-        track.stop();
+        setNotice(error instanceof Error ? error.message : "A recording chunk could not be saved locally.");
+        logLiveClass("recording chunk persistence failed", { sessionId, chunkNumber, error: String(error) });
       });
-      microphone?.getTracks().forEach((track) => {
-        intentionalStopTracksRef.current.add(track);
-        track.stop();
-      });
-      if (audioContext && audioContext.state !== "closed") await audioContext.close();
-      audioContextRef.current = null;
-      throw error;
-    }
+    };
+    recorder.onerror = (event: Event) => {
+      setRecordingState("failed");
+      setNotice("The browser recording stopped unexpectedly. Saved chunks will be recovered automatically.");
+      logLiveClass("MediaRecorder error", { sessionId, error: String(event) });
+    };
+    recorderRef.current = recorder;
+    recorder.start(5000);
+    setRecordingState("recording");
+    logLiveClass("automatic class recording started", { sessionId, mimeType: recorder.mimeType });
   };
 
-  const stopBrowserRecording = async () => {
+  const stopBrowserRecording = async (sessionId?: string) => {
     if (stopRecordingPromiseRef.current) return stopRecordingPromiseRef.current;
     const recorder = recorderRef.current;
     const stopTask = (async () => {
-      try {
-        if (periodicUploadTimerRef.current !== null) {
-          window.clearInterval(periodicUploadTimerRef.current);
-          periodicUploadTimerRef.current = null;
-        }
-        if (recorder?.state === "recording") {
-          await new Promise<void>((resolve) => {
-            recorder.addEventListener("stop", () => resolve(), { once: true });
-            recorder.stop();
-          });
-        }
-        await chunkWritesRef.current;
-        await periodicUploadTaskRef.current;
-        const sessionId = info?.sessionId;
-        if (recorder && sessionId && nextChunkNumberRef.current > 1) {
-          await markRecordingQueueFinalizing(sessionId);
-        }
-      } finally {
-        recorderRef.current = null;
-        setRecordingState("idle");
-        captureStreamRef.current?.getTracks().forEach((track) => {
-          intentionalStopTracksRef.current.add(track);
-          track.stop();
+      if (recorder?.state === "recording") {
+        await new Promise<void>((resolve) => {
+          recorder.addEventListener("stop", () => resolve(), { once: true });
+          recorder.stop();
         });
-        microphoneStreamRef.current?.getTracks().forEach((track) => {
-          intentionalStopTracksRef.current.add(track);
-          track.stop();
-        });
-        captureStreamRef.current = null;
-        microphoneStreamRef.current = null;
-        setCaptureStream(null);
-        if (audioContextRef.current && audioContextRef.current.state !== "closed") {
-          await audioContextRef.current.close();
-        }
-        audioContextRef.current = null;
       }
+      await chunkWritesRef.current;
+      if (sessionId && nextChunkNumberRef.current > 1) {
+        await markRecordingQueueFinalizing(sessionId);
+        setRecordingState("saved");
+        setNotice("Recording saved locally. Upload starts automatically and resumes when the connection returns.");
+      } else {
+        setRecordingState("idle");
+      }
+      recorderRef.current = null;
     })();
     stopRecordingPromiseRef.current = stopTask;
     try {
@@ -604,150 +497,214 @@ export default function LiveClassRoom() {
     }
   };
 
-  const uploadRecording = async (finalize = true) => {
-    if (!info || uploadInProgressRef.current) return;
+  const uploadRecording = async (sessionId: string) => {
+    if (uploadInProgressRef.current) return;
     uploadInProgressRef.current = true;
-    if (finalize) {
-      setRecordingState("uploading");
-      setRecordingProgress(0);
-      setNotice("");
-    } else {
-      setPeriodicUploadState("uploading");
-    }
+    let claimed = false;
     try {
-      await chunkWritesRef.current;
-      const chunks = await getQueuedRecordingChunks(info.sessionId);
-      if (chunks.length === 0) throw new Error("No saved browser recording was found for this class.");
-      const mimeType = chunks.find((chunk) => chunk.blob.type)?.blob.type || "video/webm";
+      if (!navigator.onLine) {
+        if (sessionId === info?.sessionId) setRecordingState("saved");
+        return;
+      }
+      claimed = await claimRecordingQueueUpload(sessionId);
+      if (!claimed) return;
+      let session = await getRecordingQueueSession(sessionId);
+      if (!session) return;
+      const chunks = await getQueuedRecordingChunks(sessionId);
+      if (session.endClassPending) {
+        if (chunks.length === 0) {
+          await requestJson(`/api/collaboration/sessions/${encodeURIComponent(sessionId)}/start`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ recordingAvailable: false }),
+          });
+        }
+        await requestJson(`/api/collaboration/sessions/${encodeURIComponent(sessionId)}/end`, { method: "POST" });
+        session = await updateRecordingQueueSession(sessionId, { endClassPending: false });
+        if (sessionId === info?.sessionId) {
+          setInfo((current) => current ? { ...current, classStatus: "ended" } : current);
+          setStatus("failed");
+        }
+      }
+      if (!session.finalizePending) return;
+      if (chunks.length === 0) {
+        await clearRecordingQueueSession(sessionId);
+        if (sessionId === info?.sessionId) setRecordingState("idle");
+        return;
+      }
+      const mimeType = session.mimeType || chunks.find((chunk) => chunk.blob.type)?.blob.type || "video/webm";
       const file = new Blob(chunks.map((chunk) => chunk.blob), { type: mimeType });
+      if (!file.size) throw new Error("The saved class recording is empty.");
       const signature = await requestJson<RecordingUploadSignature>(
-        `/api/collaboration/sessions/${encodeURIComponent(info.sessionId)}/recording-signature`,
+        `/api/collaboration/sessions/${encodeURIComponent(sessionId)}/recording-signature`,
         { method: "POST" },
       );
-      const uniqueUploadId = crypto.randomUUID();
+      const uploadId = session.uploadId || crypto.randomUUID();
+      let uploadedBytes = Math.min(session.uploadedBytes || 0, file.size);
+      let uploadResult: { public_id?: string; done?: boolean } | null =
+        session.uploadConfirmed && uploadedBytes === file.size
+          ? { public_id: signature.publicId, done: true }
+          : null;
+      await updateRecordingQueueSession(sessionId, {
+        uploadId,
+        uploadedBytes,
+        mimeType,
+        uploadLeaseUntil: Date.now() + 120_000,
+      });
       const chunkSize = 6 * 1024 * 1024;
-      let uploadResult: { public_id?: string; done?: boolean } | null = null;
+      if (sessionId === info?.sessionId) {
+        setRecordingState("uploading");
+        setRecordingProgress(Math.round((uploadedBytes / file.size) * 100));
+      }
 
-      for (let start = 0; start < file.size; start += chunkSize) {
+      while (uploadedBytes < file.size) {
+        const start = uploadedBytes;
         const end = Math.min(start + chunkSize, file.size);
         const form = new FormData();
-        form.append("file", file.slice(start, end, mimeType), "recording.webm");
+        form.append("file", file.slice(start, end, mimeType), mimeType.includes("mp4") ? "recording.mp4" : "recording.webm");
         form.append("api_key", signature.apiKey);
         form.append("timestamp", signature.timestamp);
         form.append("public_id", signature.publicId);
         form.append("overwrite", signature.overwrite);
         form.append("type", signature.type);
         form.append("signature", signature.signature);
-
-        let lastError: Error | null = null;
-        for (let attempt = 0; attempt < 5; attempt += 1) {
-          try {
-            const response = await fetch(
-              `https://api.cloudinary.com/v1_1/${encodeURIComponent(signature.cloudName)}/video/upload`,
-              {
-                method: "POST",
-                headers: {
-                  "Content-Range": `bytes ${start}-${end - 1}/${file.size}`,
-                  "X-Unique-Upload-Id": uniqueUploadId,
-                },
-                body: form,
-              },
-            );
-            const result = await response.json() as { public_id?: string; done?: boolean; error?: { message?: string } };
-            if (!response.ok) throw new Error(`Recording upload failed (${response.status}).`);
-            uploadResult = result;
-            lastError = null;
-            break;
-          } catch (error) {
-            lastError = error instanceof Error ? error : new Error("The recording upload failed.");
-            if (attempt < 4) await new Promise((resolve) => window.setTimeout(resolve, 1000 * (2 ** attempt)));
-          }
-        }
-        if (lastError) throw lastError;
-        if (finalize) setRecordingProgress(Math.round((end / file.size) * 100));
-        logLiveClass("recording upload chunk complete", { sessionId: info.sessionId, start, end });
+        const response = await fetch(
+          `https://api.cloudinary.com/v1_1/${encodeURIComponent(signature.cloudName)}/video/upload`,
+          {
+            method: "POST",
+            headers: {
+              "Content-Range": `bytes ${start}-${end - 1}/${file.size}`,
+              "X-Unique-Upload-Id": uploadId,
+            },
+            body: form,
+          },
+        );
+        const result = await response.json() as { public_id?: string; done?: boolean; error?: { message?: string } };
+        if (!response.ok) throw new Error(result.error?.message || `Recording upload failed (${response.status}).`);
+        uploadResult = result;
+        uploadedBytes = end;
+        await updateRecordingQueueSession(sessionId, {
+          uploadedBytes,
+          uploadConfirmed: result.done === true && result.public_id === signature.publicId,
+          uploadLeaseUntil: Date.now() + 120_000,
+        });
+        if (sessionId === info?.sessionId) setRecordingProgress(Math.round((end / file.size) * 100));
+        logLiveClass("recording upload chunk confirmed", { sessionId, start, end });
       }
+
       if (!uploadResult?.done || uploadResult.public_id !== signature.publicId) {
         throw new Error("Recording storage did not confirm the completed upload.");
       }
-      if (finalize) {
-        await requestJson(`/api/collaboration/sessions/${encodeURIComponent(info.sessionId)}/recording-complete`, {
-          method: "POST",
-        });
-        await clearRecordingQueueSession(info.sessionId);
+      await requestJson(`/api/collaboration/sessions/${encodeURIComponent(sessionId)}/recording-complete`, {
+        method: "POST",
+      });
+      await clearRecordingQueueSession(sessionId);
+      if (sessionId === info?.sessionId) {
         setRecordingState("ready");
         setRecordedChunkCount(0);
-        setPeriodicUploadState("saved");
-        setNotice("Recording saved.");
-      } else {
-        setPeriodicUploadState("saved");
-        setNotice((current) => current.startsWith("Automatic save failed") ? "" : current);
+        setNotice("Recording uploaded and confirmed.");
       }
+      logLiveClass("recording upload confirmed by server", { sessionId });
     } catch (error) {
       const reason = error instanceof Error ? error.message : "The recording upload failed.";
-      if (finalize) {
-        setRecordingState("failed");
-        setNotice(reason);
-        try {
-          await requestJson(`/api/collaboration/sessions/${encodeURIComponent(info.sessionId)}/recording-failed`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ reason }),
-          });
-        } catch (reportError) {
-          logLiveClass("recording failure could not be reported", { sessionId: info.sessionId, error: String(reportError) });
-        }
-      } else {
-        setPeriodicUploadState("failed");
-        setNotice("Automatic save failed. The recording will be retried in 30 seconds.");
-        logLiveClass("periodic recording upload failed", { sessionId: info.sessionId, error: reason });
+      const session = await getRecordingQueueSession(sessionId).catch(() => null);
+      if (session) {
+        const retryCount = (session.retryCount || 0) + 1;
+        const delay = Math.min(30_000 * (2 ** Math.min(retryCount - 1, 7)), 60 * 60 * 1000);
+        await updateRecordingQueueSession(sessionId, {
+          retryCount,
+          nextRetryAt: Date.now() + delay,
+          uploadLeaseUntil: 0,
+        }).catch(() => undefined);
+        window.setTimeout(() => {
+          if (navigator.onLine) void uploadRecordingRef.current?.(sessionId);
+        }, delay);
       }
+      if (sessionId === info?.sessionId) {
+        setRecordingState("saved");
+        setNotice("Recording is saved locally. Upload will retry automatically when the connection is available.");
+      }
+      logLiveClass("recording upload queued for retry", { sessionId, error: reason });
+      void requestBackgroundRecordingSync();
     } finally {
+      if (claimed) {
+        await updateRecordingQueueSession(sessionId, { uploadLeaseUntil: 0 }).catch(() => undefined);
+      }
       uploadInProgressRef.current = false;
     }
   };
   uploadRecordingRef.current = uploadRecording;
 
-  const toggleBrowserRecording = async () => {
-    if (!info || busy) return;
-    setBusy(true);
-    try {
-      await startBrowserRecording(info.sessionId);
-      try {
-        const result = await requestJson<{ recordingAvailable: boolean }>(
-          `/api/collaboration/sessions/${encodeURIComponent(info.sessionId)}/start`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ recordingAvailable: true }),
-        });
-        if (!result.recordingAvailable) throw new Error("The class is live, but the server could not enable recording. Try again or ask an administrator for help.");
-        setInfo((current) => current ? { ...current, recordingStatus: "recording" } : current);
-      } catch (error) {
-        await stopBrowserRecording();
-        throw error;
+  useEffect(() => {
+    if (!info || info.role !== "teacher" || info.classStatus !== "live" || !recordingStream) return;
+    let active = true;
+    void getRecordingQueueSession(info.sessionId).then((session) => {
+      if (session?.endClassPending) return;
+      if (!active) return;
+      return startBrowserRecording(info.sessionId, recordingStream);
+    }).catch((error: unknown) => {
+      if (!active) return;
+      setRecordingState("failed");
+      setNotice(error instanceof Error ? error.message : "Automatic recording could not start.");
+    });
+    return () => {
+      active = false;
+    };
+  }, [info?.classStatus, info?.role, info?.sessionId, recordingStream]);
+
+  useEffect(() => {
+    if (!info || info.role !== "teacher") return;
+    let active = true;
+    const onServiceWorkerMessage = (event: MessageEvent<{ type?: string; sessionId?: string }>) => {
+      if (event.data?.sessionId !== info.sessionId) return;
+      if (event.data.type === "recording-uploading") setRecordingState("uploading");
+      if (event.data.type === "recording-uploaded") {
+        setRecordingState("ready");
+        setRecordedChunkCount(0);
+        setNotice("Recording uploaded and confirmed.");
       }
-    } catch (error) {
-      setNotice(error instanceof Error ? error.message : "The browser recorder could not be started.");
-    } finally {
-      setBusy(false);
-    }
-  };
+      if (event.data.type === "class-ended") {
+        setInfo((current) => current ? { ...current, classStatus: "ended" } : current);
+        setStatus("failed");
+      }
+    };
+    const retryPendingRecordings = async () => {
+      if (!navigator.onLine || !active) return;
+      try {
+        const sessions = await getRecordingQueueSessions();
+        for (const session of sessions) {
+          if (!active || !session.finalizePending ||
+              (session.nextRetryAt || 0) > Date.now()) continue;
+          await uploadRecordingRef.current?.(session.sessionId);
+        }
+      } catch (error) {
+        logLiveClass("pending recording scan failed", { error: String(error) });
+      }
+    };
+    const onOnline = () => void retryPendingRecordings();
+    const retryTimer = window.setInterval(() => void retryPendingRecordings(), 30_000);
+    window.addEventListener("online", onOnline);
+    navigator.serviceWorker?.addEventListener("message", onServiceWorkerMessage);
+    void navigator.serviceWorker?.register("/live-class-recording-sw.js", { scope: "/" })
+      .then(() => requestBackgroundRecordingSync())
+      .catch((error: unknown) => logLiveClass("recording service worker unavailable", { error: String(error) }));
+    void retryPendingRecordings();
+    return () => {
+      active = false;
+      window.clearInterval(retryTimer);
+      window.removeEventListener("online", onOnline);
+      navigator.serviceWorker?.removeEventListener("message", onServiceWorkerMessage);
+    };
+  }, [info?.role]);
 
   const startClass = async () => {
     if (!info) return;
     setBusy(true);
     setNotice("");
     try {
-      const [previousSession, previousChunks] = await Promise.all([
-        getRecordingQueueSession(info.sessionId),
-        getQueuedRecordingChunks(info.sessionId),
-      ]);
-      if (previousSession || previousChunks.length > 0) {
-        await clearRecordingQueueSession(info.sessionId);
-        setRecordedChunkCount(0);
-        setRecordingStopped(false);
-      }
-      await startBrowserRecording(info.sessionId);
+      void recordingAudioResumeRef.current?.().catch((error: unknown) =>
+        logLiveClass("recording audio mixer could not resume", { error: String(error) }));
+      await ensureRecordingQueueSession(info.sessionId);
       const result = await requestJson<{ recordingAvailable: boolean }>(
         `/api/collaboration/sessions/${encodeURIComponent(info.sessionId)}/start`, {
         method: "POST",
@@ -757,7 +714,6 @@ export default function LiveClassRoom() {
       if (!result.recordingAvailable) throw new Error("The class started, but browser recording was not enabled. Try again or ask an administrator for help.");
       await refreshJoin(true);
     } catch (error) {
-      await stopBrowserRecording();
       setNotice(error instanceof Error ? error.message : "The class could not be started.");
     } finally {
       setBusy(false);
@@ -787,34 +743,35 @@ export default function LiveClassRoom() {
     setBusy(true);
     setNotice("");
     try {
-      await stopBrowserRecording();
-      await recordingStatusUpdateRef.current;
-      const chunks = await getQueuedRecordingChunks(info.sessionId);
-      if (chunks.length > 0) {
-        const recording = await requestJson<{ recordingAvailable: boolean }>(
-          `/api/collaboration/sessions/${encodeURIComponent(info.sessionId)}/start`,
-          {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ recordingAvailable: true }),
-          },
-        );
-        if (!recording.recordingAvailable) throw new Error("The class is live, but the saved recording could not be prepared for upload.");
-      } else if (info.recordingStatus === "recording") {
+      await updateRecordingQueueSession(info.sessionId, { finalizePending: true, endClassPending: true });
+      await stopBrowserRecording(info.sessionId);
+      await updateRecordingQueueSession(info.sessionId, { finalizePending: true, endClassPending: true });
+      if ((await getQueuedRecordingChunks(info.sessionId)).length === 0) {
         await requestJson(`/api/collaboration/sessions/${encodeURIComponent(info.sessionId)}/start`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ recordingAvailable: false }),
         });
       }
+      await requestBackgroundRecordingSync();
       await requestJson(`/api/collaboration/sessions/${encodeURIComponent(info.sessionId)}/end`, {
         method: "POST",
       });
+      await updateRecordingQueueSession(info.sessionId, { endClassPending: false }).catch(() => undefined);
       setInfo((current) => current ? { ...current, classStatus: "ended" } : current);
       setStatus("failed");
-      if (chunks.length > 0) await uploadRecording();
+      void uploadRecording(info.sessionId);
+      void requestBackgroundRecordingSync();
     } catch (error) {
-      setNotice(error instanceof Error ? error.message : "The class could not be ended.");
+      const session = await getRecordingQueueSession(info.sessionId).catch(() => null);
+      if (session?.finalizePending) {
+        await updateRecordingQueueSession(info.sessionId, { endClassPending: true }).catch(() => undefined);
+        setRecordingState("saved");
+        setNotice("Recording saved locally. Class ending and upload will retry automatically when the connection returns.");
+        void requestBackgroundRecordingSync();
+      } else {
+        setNotice(error instanceof Error ? error.message : "The class could not be ended.");
+      }
     } finally {
       setBusy(false);
     }
@@ -947,43 +904,31 @@ export default function LiveClassRoom() {
               role={info.role === "teacher" ? "teacher" : "learner"}
               classStatus={info.classStatus === "live" ? "live" : "scheduled"}
               teacherName={info.teacherName}
+              onRecordingStream={setRecordingStream}
+              onRecordingAudioResume={setRecordingAudioResume}
             />
-            <video
-              className={styles.capturePreview}
-              ref={recordingPreview}
-              autoPlay
-              muted
-              playsInline
-              aria-hidden="true"
-            />
-            {(recordingState === "recording" || info.recordingStatus === "recording") && (
+            {isTeacher && (recordingState !== "idle" || info.recordingStatus === "recording" || info.recordingStatus === "ready") && (
               <span className={`${styles.recordingIndicator} livekit-recording-indicator`} role="status">
-                Recording{isTeacher && recordingState === "recording" ? ` · ${formatDuration(recordingDuration)}` : ""}
+                {recordingState === "uploading"
+                  ? "Uploading"
+                  : recordingState === "ready"
+                    ? "Uploaded"
+                    : info.recordingStatus === "ready"
+                      ? "Uploaded"
+                    : recordingState === "saved"
+                      ? "Saved locally"
+                    : recordingState === "failed"
+                      ? "Recording unavailable"
+                      : "Recording"}
+                {recordingState === "recording" ? ` · ${formatDuration(recordingDuration)}` : ""}
               </span>
             )}
             {isTeacher && info.classStatus === "live" && (
               <div className={`${styles.recordingControls} livekit-recording-controls`}>
-                {recordingState === "recording" ? (
-                  <p role="status">
-                    {periodicUploadState === "uploading"
-                      ? "Saving recording…"
-                      : periodicUploadState === "failed"
-                        ? "Automatic save failed. It will retry in 30 seconds."
-                        : periodicUploadState === "saved"
-                          ? "Recording saved. Automatic saves continue every 30 seconds."
-                          : "Recording. Automatic saves run every 30 seconds."}
-                  </p>
-                ) : recordingState !== "uploading" &&
-                    recordingState !== "ready" &&
-                    (info.recordingStatus !== "recording" || recordingState === "failed") &&
-                    !recordingStopped &&
-                    recordedChunkCount === 0 ? (
-                  <button className="button button-outline" type="button" disabled={busy} onClick={toggleBrowserRecording}>
-                    Start browser recording
-                  </button>
-                ) : recordedChunkCount > 0 && recordingState !== "uploading" ? (
-                  <p>Recording capture has stopped. End the class to upload the saved recording.</p>
-                ) : null}
+                {recordingState === "recording" && <p role="status">Recording and saving locally every five seconds.</p>}
+                {recordingState === "saved" && <p role="status">Saved locally. Upload retries automatically.</p>}
+                {recordingState === "ready" && <p role="status">Recording uploaded and confirmed.</p>}
+                {recordingState === "failed" && <p role="status">Recording could not start. Previously saved chunks remain queued.</p>}
                 {recordingState === "uploading" && (
                   <>
                     <p role="status">Uploading recording… {recordingProgress}%</p>
@@ -991,11 +936,6 @@ export default function LiveClassRoom() {
                   </>
                 )}
               </div>
-            )}
-            {isTeacher && info.classStatus === "live" && recordingState === "idle" && recordedChunkCount === 0 && info.recordingStatus !== "recording" && (
-              <p className={`${styles.recordingInstructions} livekit-recording-instructions`}>
-                When prompted, choose this tab and enable “Share tab audio”. Microphone audio is included when permitted.
-              </p>
             )}
           </div>
           <aside className={`${styles.sidebar} livekit-sidebar`}>
@@ -1072,15 +1012,13 @@ export default function LiveClassRoom() {
       {isTeacher && (info.classStatus === "ended" || info.classStatus === "cancelled") &&
         recordedChunkCount > 0 && recordingState !== "ready" && (
         <div className={`${styles.recovery} livekit-recording-recovery`}>
-          <p>A browser recording with {recordedChunkCount} saved chunks is ready to upload.</p>
+          <p role="status">{recordingState === "uploading" ? "Uploading saved recording…" : `Saved locally (${recordedChunkCount} chunks). Upload retries automatically.`}</p>
           {recordingState === "uploading"
-            ? <div className="livekit-recording-upload-progress" role="status">
+            ? <div className="livekit-recording-upload-progress">
               <p>Uploading… {recordingProgress}%</p>
               <progress value={recordingProgress} max={100} aria-label="Recording upload progress" />
             </div>
-            : <button className="button" type="button" disabled={busy} onClick={() => void uploadRecording()}>
-              {recordingState === "failed" ? "Retry recording upload" : "Upload recording"}
-            </button>}
+            : null}
         </div>
       )}
       </section>
