@@ -1,0 +1,811 @@
+.room {
+  --room-ink: #242a24;
+  --room-muted: #727a70;
+  --room-line: #e6e9e2;
+  --room-paper: #ffffff;
+  --room-wash: #f5f6f1;
+  --room-accent: #d26f35;
+  --room-green: #43856a;
+  box-sizing: border-box;
+  width: min(100% - 40px, 1440px);
+  min-height: min(760px, calc(100vh - 112px));
+  margin: 0 auto;
+  padding: 18px 0 42px;
+  display: grid;
+  align-content: start;
+  gap: 20px;
+  color: var(--room-ink);
+}
+
+.room *,
+.room *::before,
+.room *::after {
+  box-sizing: border-box;
+}
+
+.room .header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 28px;
+  padding: 24px 28px;
+  border: 1px solid rgba(37, 46, 37, 0.08);
+  border-radius: 22px;
+  background:
+    radial-gradient(ellipse at 92% 10%, rgba(210, 111, 53, 0.09), transparent 34%),
+    var(--room-paper);
+  box-shadow: 0 12px 35px rgba(37, 46, 37, 0.055);
+}
+
+.room .headerCopy {
+  min-width: 0;
+}
+
+.room .header h1 {
+  margin: 4px 0 6px;
+  color: var(--room-ink);
+  font-size: clamp(1.45rem, 2.2vw, 2.05rem);
+  font-weight: 750;
+  letter-spacing: -0.045em;
+  line-height: 1.15;
+}
+
+.room .kicker {
+  margin: 0;
+  color: var(--room-accent);
+  font-size: 0.7rem;
+  font-weight: 800;
+  letter-spacing: 0.11em;
+  line-height: 1.4;
+  text-transform: uppercase;
+}
+
+.room .subtitle {
+  margin: 0;
+  color: var(--room-muted);
+  font-size: 0.9rem;
+}
+
+.room .subtitle span {
+  padding: 0 5px;
+  color: #b6bdb2;
+}
+
+.room .headerActions {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.room .headerActions button,
+.room .retryButton,
+.room .sendButton {
+  min-height: 42px;
+  border-radius: 12px;
+  font-weight: 700;
+}
+
+.room .connectionStatus {
+  display: inline-flex;
+  min-height: 36px;
+  align-items: center;
+  gap: 9px;
+  padding: 0 13px;
+  border: 1px solid var(--room-line);
+  border-radius: 999px;
+  background: #fbfcf9;
+  color: #596258;
+  font-size: 0.8rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.room .connectionStatus > span {
+  width: 8px;
+  height: 8px;
+  flex: 0 0 8px;
+  border-radius: 50%;
+  background: #98a096;
+}
+
+.room .status_connected > span {
+  background: #3eaa75;
+  box-shadow: 0 0 0 4px rgba(62, 170, 117, 0.13);
+}
+
+.room .status_connecting > span,
+.room .status_reconnecting > span {
+  background: #e2a443;
+  box-shadow: 0 0 0 4px rgba(226, 164, 67, 0.13);
+  animation: pulse 1.6s ease-in-out infinite;
+}
+
+.room .status_failed {
+  border-color: #f0d7d0;
+  background: #fff8f6;
+  color: #a63e2b;
+}
+
+.room .status_failed > span {
+  background: #d55d49;
+}
+
+.room .notice,
+.room .setupNote {
+  margin: 0;
+  padding: 14px 18px;
+  border: 1px solid #f0d7d0;
+  border-radius: 14px;
+  background: #fff8f6;
+  color: #8d392b;
+  font-size: 0.9rem;
+  line-height: 1.55;
+}
+
+.room .setupNote {
+  border-color: #e7e9dd;
+  background: #f9faf5;
+  color: #60695e;
+}
+
+.room .waitingCard,
+.room .terminalCard {
+  display: flex;
+  max-width: 860px;
+  align-items: center;
+  gap: 20px;
+  margin: clamp(32px, 8vh, 86px) auto;
+  padding: clamp(25px, 5vw, 48px);
+  border: 1px solid var(--room-line);
+  border-radius: 24px;
+  background: var(--room-paper);
+  box-shadow: 0 18px 50px rgba(37, 46, 37, 0.07);
+}
+
+.room .waitingIcon,
+.room .terminalIcon {
+  display: grid;
+  width: 64px;
+  height: 64px;
+  flex: 0 0 64px;
+  place-items: center;
+  border-radius: 20px;
+  background: #fff3e9;
+  color: var(--room-accent);
+  font-size: 1.8rem;
+}
+
+.room .waitingCard .kicker {
+  margin-bottom: 8px;
+}
+
+.room .waitingCard strong,
+.room .terminalCard strong {
+  display: block;
+  color: var(--room-ink);
+  font-size: clamp(1.25rem, 2.4vw, 1.8rem);
+  letter-spacing: -0.035em;
+}
+
+.room .waitingCard p:last-child,
+.room .terminalCard p {
+  margin: 8px 0 0;
+  color: var(--room-muted);
+  font-size: 0.95rem;
+  line-height: 1.55;
+}
+
+.room .terminalIcon {
+  background: #edf5ef;
+  color: var(--room-green);
+  font-size: 2rem;
+  font-weight: 700;
+}
+
+.room .layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1.7fr) minmax(310px, 0.78fr);
+  align-items: start;
+  gap: 20px;
+}
+
+.room .stage {
+  position: relative;
+  display: grid;
+  min-width: 0;
+  min-height: 460px;
+  aspect-ratio: 16 / 9;
+  overflow: hidden;
+  place-items: center;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 24px;
+  background:
+    radial-gradient(ellipse at 50% 34%, rgba(78, 101, 80, 0.5), transparent 45%),
+    linear-gradient(145deg, #1d2723 0%, #202c29 48%, #17201d 100%);
+  box-shadow: 0 18px 46px rgba(22, 33, 27, 0.16);
+  color: #fff;
+}
+
+.room .preview {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  background: #111;
+}
+
+.room .placeholder {
+  display: flex;
+  width: min(460px, calc(100% - 40px));
+  flex-direction: column;
+  align-items: center;
+  padding: 36px 12px;
+  text-align: center;
+}
+
+.room .stageIcon {
+  display: grid;
+  width: 72px;
+  height: 72px;
+  margin-bottom: 23px;
+  place-items: center;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 24px;
+  background: rgba(255, 255, 255, 0.09);
+  color: #f0aa75;
+  font-size: 2rem;
+}
+
+.room .placeholder .kicker {
+  margin-bottom: 10px;
+  color: #f2ad78;
+}
+
+.room .placeholder strong {
+  font-size: clamp(1.45rem, 3vw, 2.2rem);
+  letter-spacing: -0.04em;
+}
+
+.room .placeholder > p:last-child {
+  max-width: 410px;
+  margin: 12px 0 0;
+  color: rgba(255, 255, 255, 0.69);
+  font-size: 0.91rem;
+  line-height: 1.6;
+}
+
+.room .recordingIndicator {
+  position: absolute;
+  top: 18px;
+  left: 18px;
+  z-index: 2;
+  display: inline-flex;
+  min-height: 34px;
+  align-items: center;
+  gap: 8px;
+  padding: 0 12px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 999px;
+  background: rgba(29, 34, 31, 0.76);
+  color: #fff;
+  font-size: 0.76rem;
+  font-weight: 750;
+  backdrop-filter: blur(8px);
+}
+
+.room .recordingIndicator::before {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #f06455;
+  box-shadow: 0 0 0 4px rgba(240, 100, 85, 0.17);
+  content: "";
+}
+
+.room .recordingControls {
+  position: absolute;
+  right: 16px;
+  bottom: 16px;
+  left: 16px;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding: 12px 15px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 16px;
+  background: rgba(17, 24, 21, 0.8);
+  color: rgba(255, 255, 255, 0.88);
+  text-align: center;
+  backdrop-filter: blur(10px);
+}
+
+.room .recordingControls p {
+  margin: 0;
+  font-size: 0.83rem;
+  line-height: 1.45;
+}
+
+.room .recordingControls button {
+  border-color: rgba(255, 255, 255, 0.28);
+  background: rgba(255, 255, 255, 0.1);
+  color: #fff;
+}
+
+.room .recordingControls progress,
+.room .recovery progress {
+  width: min(220px, 100%);
+  height: 9px;
+  accent-color: var(--room-accent);
+}
+
+.room .recordingInstructions {
+  position: absolute;
+  right: 20px;
+  bottom: 18px;
+  left: 20px;
+  margin: 0;
+  color: rgba(255, 255, 255, 0.72);
+  font-size: 0.78rem;
+  line-height: 1.45;
+  text-align: center;
+}
+
+.room .sidebar {
+  display: grid;
+  min-width: 0;
+  gap: 16px;
+}
+
+.room .roster,
+.room .chat {
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid var(--room-line);
+  border-radius: 20px;
+  background: var(--room-paper);
+  box-shadow: 0 10px 28px rgba(37, 46, 37, 0.045);
+}
+
+.room .roster {
+  padding: 19px 20px;
+}
+
+.room .cardHeader,
+.room .chatHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.room .cardHeader h2,
+.room .chatHeader h2 {
+  margin: 4px 0 0;
+  color: var(--room-ink);
+  font-size: 1.1rem;
+  font-weight: 750;
+  letter-spacing: -0.025em;
+}
+
+.room .studentCount {
+  display: grid;
+  min-width: 42px;
+  height: 42px;
+  padding: 0 10px;
+  place-items: center;
+  border-radius: 14px;
+  background: #eff5ef;
+  color: #3c795d;
+  font-size: 1rem;
+  font-weight: 800;
+}
+
+.room .attendanceHeading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin: 19px 0 9px;
+  padding-top: 15px;
+  border-top: 1px solid var(--room-line);
+  color: var(--room-muted);
+  font-size: 0.78rem;
+  font-weight: 650;
+}
+
+.room .attendanceHeading span {
+  display: grid;
+  min-width: 25px;
+  height: 25px;
+  place-items: center;
+  border-radius: 8px;
+  background: var(--room-wash);
+  color: var(--room-ink);
+  font-size: 0.72rem;
+  font-weight: 750;
+}
+
+.room .roster ul {
+  display: grid;
+  max-height: 224px;
+  gap: 9px;
+  overflow: auto;
+  margin: 0;
+  padding: 0 2px 0 0;
+  list-style: none;
+}
+
+.room .roster li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 4px 10px;
+  padding: 11px 12px;
+  border: 1px solid #edf0ea;
+  border-radius: 12px;
+  background: #fcfcfa;
+}
+
+.room .roster li strong {
+  overflow: hidden;
+  color: var(--room-ink);
+  font-size: 0.82rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.room .roster li small {
+  color: #527d62;
+  font-size: 0.7rem;
+  font-weight: 700;
+  text-align: right;
+}
+
+.room .roster li time {
+  grid-column: 1 / -1;
+  color: var(--room-muted);
+  font-size: 0.69rem;
+}
+
+.room .chat {
+  display: grid;
+  grid-template-rows: auto minmax(130px, 1fr) auto auto;
+  min-height: 300px;
+}
+
+.room .chatHeader {
+  padding: 17px 19px 14px;
+  border-bottom: 1px solid var(--room-line);
+}
+
+.room .chatIcon {
+  display: grid;
+  width: 34px;
+  height: 34px;
+  place-items: center;
+  border-radius: 11px;
+  background: #fff3e9;
+  color: var(--room-accent);
+  font-size: 1.1rem;
+}
+
+.room .chatMessages {
+  display: flex;
+  max-height: 300px;
+  min-height: 150px;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 10px;
+  overflow: auto;
+  padding: 15px 16px;
+}
+
+.room .chatMessage {
+  align-self: flex-start;
+  width: min(100%, 300px);
+  padding: 10px 12px;
+  border: 1px solid #edf0ea;
+  border-radius: 4px 14px 14px;
+  background: #f8f9f5;
+}
+
+.room .chatMessage strong {
+  color: #527d62;
+  font-size: 0.73rem;
+}
+
+.room .chatMessage p {
+  margin: 4px 0 5px;
+  color: var(--room-ink);
+  font-size: 0.83rem;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.room .chatMessage time {
+  display: block;
+  color: var(--room-muted);
+  font-size: 0.65rem;
+  text-align: right;
+}
+
+.room .chatForm {
+  display: flex;
+  gap: 8px;
+  padding: 12px;
+  border-top: 1px solid var(--room-line);
+}
+
+.room .chatInput {
+  width: 100%;
+  min-width: 0;
+  min-height: 42px;
+  padding: 9px 12px;
+  border: 1px solid var(--room-line);
+  border-radius: 11px;
+  background: #fbfcf9;
+  color: var(--room-ink);
+  font: inherit;
+  font-size: 0.8rem;
+}
+
+.room .chatInput:focus {
+  border-color: #dca078;
+  outline: 3px solid rgba(210, 111, 53, 0.12);
+}
+
+.room .sendButton {
+  flex: 0 0 auto;
+  padding: 0 15px;
+}
+
+.room .chatError {
+  margin: 0;
+  padding: 0 14px 10px;
+  color: #a63e2b;
+  font-size: 0.78rem;
+}
+
+.room .recovery {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 14px;
+  padding: 18px 20px;
+  border: 1px solid var(--room-line);
+  border-radius: 16px;
+  background: var(--room-paper);
+}
+
+.room .recovery > p {
+  margin: 0;
+  color: var(--room-ink);
+  font-size: 0.9rem;
+}
+
+.room.errorRoom {
+  min-height: calc(100vh - 180px);
+  align-content: center;
+  justify-items: center;
+}
+
+.room .errorCard {
+  position: relative;
+  display: flex;
+  width: min(100%, 590px);
+  flex-direction: column;
+  align-items: flex-start;
+  padding: clamp(26px, 5vw, 48px);
+  border: 1px solid rgba(37, 46, 37, 0.08);
+  border-radius: 24px;
+  background:
+    radial-gradient(ellipse at 100% 0, rgba(210, 111, 53, 0.1), transparent 38%),
+    var(--room-paper);
+  box-shadow: 0 18px 55px rgba(37, 46, 37, 0.08);
+}
+
+.room .errorCard .connectionStatus {
+  align-self: flex-end;
+}
+
+.room .errorIcon {
+  display: grid;
+  width: 58px;
+  height: 58px;
+  margin: 12px 0 24px;
+  place-items: center;
+  border-radius: 18px;
+  background: #fff1ed;
+  color: #bf513d;
+  font-size: 1.6rem;
+  font-weight: 800;
+}
+
+.room .errorCard h1 {
+  margin: 8px 0 10px;
+  color: var(--room-ink);
+  font-size: clamp(1.65rem, 4vw, 2.25rem);
+  font-weight: 750;
+  letter-spacing: -0.05em;
+  line-height: 1.12;
+}
+
+.room .errorMessage {
+  margin: 0;
+  color: var(--room-muted);
+  font-size: 0.96rem;
+  line-height: 1.65;
+}
+
+.room .retryButton {
+  margin-top: 24px;
+  padding: 0 21px;
+}
+
+@keyframes pulse {
+  50% {
+    opacity: 0.45;
+  }
+}
+
+@media (max-width: 980px) {
+  .room .layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .room .stage {
+    min-height: 390px;
+  }
+
+  .room .sidebar {
+    grid-template-columns: minmax(0, 0.85fr) minmax(0, 1.15fr);
+    align-items: start;
+  }
+}
+
+@media (max-width: 680px) {
+  .room {
+    width: min(100% - 24px, 1440px);
+    min-height: calc(100vh - 80px);
+    gap: 13px;
+    padding: 10px 0 28px;
+  }
+
+  .room .header {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 16px;
+    padding: 19px 18px;
+    border-radius: 18px;
+  }
+
+  .room .headerActions {
+    width: 100%;
+    justify-content: flex-start;
+  }
+
+  .room .headerActions button {
+    flex: 1 1 auto;
+  }
+
+  .room .connectionStatus {
+    min-height: 34px;
+    padding: 0 11px;
+  }
+
+  .notice,
+  .setupNote {
+    padding: 12px 14px;
+    font-size: 0.83rem;
+  }
+
+  .room .stage {
+    min-height: min(58vh, 430px);
+    aspect-ratio: 4 / 3;
+    border-radius: 19px;
+  }
+
+  .room .placeholder {
+    width: calc(100% - 28px);
+    padding: 24px 6px;
+  }
+
+  .room .stageIcon {
+    width: 58px;
+    height: 58px;
+    margin-bottom: 17px;
+    border-radius: 18px;
+  }
+
+  .room .placeholder > p:last-child {
+    font-size: 0.82rem;
+  }
+
+  .recordingIndicator {
+    top: 12px;
+    left: 12px;
+  }
+
+  .recordingControls {
+    right: 10px;
+    bottom: 10px;
+    left: 10px;
+    padding: 10px;
+  }
+
+  .recordingInstructions {
+    right: 12px;
+    bottom: 13px;
+    left: 12px;
+    font-size: 0.7rem;
+  }
+
+  .room .sidebar {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .room .waitingCard,
+  .room .terminalCard {
+    gap: 14px;
+    margin: 26px auto;
+    padding: 22px 19px;
+    border-radius: 18px;
+  }
+
+  .waitingIcon,
+  .terminalIcon {
+    width: 50px;
+    height: 50px;
+    flex-basis: 50px;
+    border-radius: 16px;
+  }
+
+  .room.errorRoom {
+    min-height: calc(100vh - 130px);
+  }
+
+  .room .errorCard {
+    border-radius: 20px;
+  }
+}
+
+@media (max-width: 380px) {
+  .room .headerActions .connectionStatus {
+    flex-basis: 100%;
+    width: fit-content;
+  }
+
+  .room .headerActions button {
+    width: 100%;
+  }
+
+  .room .stage {
+    min-height: 330px;
+  }
+
+  .room .waitingCard,
+  .room .terminalCard {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+}
+
+@media (orientation: landscape) and (max-width: 980px) {
+  .room .stage {
+    min-height: 66vh;
+    aspect-ratio: 16 / 9;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .room .status_connecting > span,
+  .room .status_reconnecting > span {
+    animation: none;
+  }
+}

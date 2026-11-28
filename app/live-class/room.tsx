@@ -10,6 +10,7 @@ import {
   markRecordingQueueFinalizing,
   queueRecordingChunk,
 } from "./recording-queue";
+import styles from "./room.module.css";
 
 type ClassStatus = "scheduled" | "live" | "ended" | "cancelled";
 type ConnectionStatus = "connecting" | "connected" | "reconnecting" | "failed" | "waiting";
@@ -705,16 +706,25 @@ export default function LiveClassRoom() {
 
   if (!info) {
     return (
-      <section className="livekit-room" aria-live="polite">
-        <div className={`livekit-connection-status is-${status}`}>
-          <span />{status === "connecting" ? "Connecting" : "Failed"}
+      <section className={`${styles.room} ${styles.errorRoom} livekit-room`} aria-live="polite">
+        <div className={styles.errorCard}>
+          <div className={`${styles.connectionStatus} ${styles[`status_${status}`]}`} role="status">
+            <span />{status === "connecting" ? "Connecting" : "Unable to connect"}
+          </div>
+          <span className={styles.errorIcon} aria-hidden="true">!</span>
+          <p className={styles.kicker}>International Forces · Live class</p>
+          <h1>{status === "connecting" ? "Opening your classroom" : "We couldn’t open this class"}</h1>
+          <p className={styles.errorMessage} role="alert">
+            {notice || (status === "connecting"
+              ? "We’re checking your access and loading the class details."
+              : "Check that you’re signed in with an account that has access to this class, then try again.")}
+          </p>
+          {status === "failed" && (
+            <button className={`button ${styles.retryButton}`} type="button" onClick={() => window.location.reload()}>
+              Try again
+            </button>
+          )}
         </div>
-        {notice && <p className="livekit-recording-notice" role="alert">{notice}</p>}
-        {status === "failed" && (
-          <button className="button button-outline" type="button" onClick={() => window.location.reload()}>
-            Try again
-          </button>
-        )}
       </section>
     );
   }
@@ -735,14 +745,17 @@ export default function LiveClassRoom() {
   const activeStudents = attendees.filter((attendee) => attendee.isPresent).length;
 
   return (
-    <section className="livekit-room">
-      <header className="livekit-header">
-        <div>
+    <section className={`${styles.room} livekit-room`}>
+      <header className={`${styles.header} livekit-header`}>
+        <div className={styles.headerCopy}>
+          <p className={styles.kicker}>Live classroom · {displayedStatus}</p>
           <h1>{info.programmeTitle}</h1>
-          <p className="admin-intro">Tutor: {info.teacherName} · {info.classStatus} · Browser recording only (no live video call)</p>
+          <p className={styles.subtitle}>
+            Tutor: {info.teacherName} <span aria-hidden="true">·</span> Browser recording classroom
+          </p>
         </div>
-        <div className="livekit-header-actions">
-          <div className={`livekit-connection-status is-${status}`} role="status">
+        <div className={`${styles.headerActions} livekit-header-actions`}>
+          <div className={`${styles.connectionStatus} ${styles[`status_${status}`]}`} role="status">
             <span />{displayedStatus}
           </div>
           {isTeacher && info.classStatus === "scheduled" && (
@@ -763,45 +776,57 @@ export default function LiveClassRoom() {
         </div>
       </header>
 
-      {notice && <p className="livekit-recording-notice" role="alert">{notice}</p>}
+      {notice && <p className={`${styles.notice} livekit-recording-notice`} role="alert">{notice}</p>}
       {isTeacher && info.classStatus === "scheduled" && (
-        <p className="livekit-recording-setup">
+        <p className={`${styles.setupNote} livekit-recording-setup`}>
           Starting the class opens the browser recording picker. Choose “This tab” and enable “Share tab audio”; microphone audio is added when permitted.
         </p>
       )}
       {info.classStatus === "scheduled" && !isTeacher && (
-        <div className="livekit-waiting-room" role="status">
-          <span className="livekit-waiting-indicator" />
-          <div><strong>Waiting for the teacher</strong><p>This page will join the class automatically when the tutor starts it.</p></div>
+        <div className={`${styles.waitingCard} livekit-waiting-room`} role="status">
+          <span className={`${styles.waitingIcon} livekit-waiting-indicator`} aria-hidden="true">⌛</span>
+          <div>
+            <p className={styles.kicker}>You’re in the right place</p>
+            <strong>Waiting for your tutor</strong>
+            <p>This classroom will update automatically when the tutor starts the session.</p>
+          </div>
         </div>
       )}
       {info.classStatus === "cancelled" && (
-        <div className="livekit-waiting-room"><strong>This class was cancelled.</strong></div>
+        <div className={`${styles.terminalCard} livekit-waiting-room`}>
+          <span className={styles.terminalIcon} aria-hidden="true">×</span>
+          <div><strong>Class cancelled</strong><p>Your tutor cancelled this session.</p></div>
+        </div>
       )}
       {info.classStatus === "ended" && (
-        <div className="livekit-waiting-room"><strong>This class has ended.</strong></div>
+        <div className={`${styles.terminalCard} livekit-waiting-room`}>
+          <span className={styles.terminalIcon} aria-hidden="true">✓</span>
+          <div><strong>Class complete</strong><p>This session has ended. Any saved recording will appear when processing finishes.</p></div>
+        </div>
       )}
 
       {info.classStatus === "live" && (
-        <div className="livekit-layout">
-          <div className="livekit-main-view" aria-label="Browser recording preview">
+        <div className={`${styles.layout} livekit-layout`}>
+          <div className={`${styles.stage} livekit-main-view`} aria-label="Browser recording preview">
             {isTeacher && captureStream
-              ? <video className="livekit-preview-video" ref={recordingPreview} autoPlay muted playsInline />
+              ? <video className={`${styles.preview} livekit-preview-video`} ref={recordingPreview} autoPlay muted playsInline />
               : (
-                <div className="livekit-main-placeholder">
-                  <strong>{isTeacher ? "Class is live" : "The teacher is live"}</strong>
-                  <p>{isTeacher
-                    ? "This classroom records in your browser; it does not provide a live video call."
-                    : "This classroom does not provide a live video call. Chat and attendance are available below."}</p>
+                <div className={`${styles.placeholder} livekit-main-placeholder`}>
+                  <span className={styles.stageIcon} aria-hidden="true">{isTeacher ? "◉" : "✦"}</span>
+                  <p className={styles.kicker}>{isTeacher ? "Your class is underway" : "Your tutor is live"}</p>
+                  <strong>{isTeacher ? "Ready when you are" : "Welcome to class"}</strong>
+                  <p>
+                    This classroom records in the tutor’s browser. Live video calling isn’t part of this room; use the class chat to stay in touch.
+                  </p>
                 </div>
               )}
             {(recordingState === "recording" || info.recordingStatus === "recording") && (
-              <span className="livekit-recording-indicator" role="status">
+              <span className={`${styles.recordingIndicator} livekit-recording-indicator`} role="status">
                 Recording{isTeacher && recordingState === "recording" ? ` · ${formatDuration(recordingDuration)}` : ""}
               </span>
             )}
             {isTeacher && (
-              <div className="livekit-recording-controls">
+              <div className={`${styles.recordingControls} livekit-recording-controls`}>
                 {recordingState === "recording" ? (
                   <p role="status">Recording this tab continuously. End the class to finish and upload.</p>
                 ) : info.classStatus === "live" &&
@@ -825,17 +850,20 @@ export default function LiveClassRoom() {
               </div>
             )}
             {isTeacher && recordingState === "idle" && recordedChunkCount === 0 && info.recordingStatus !== "recording" && (
-              <p className="livekit-recording-instructions">
+              <p className={`${styles.recordingInstructions} livekit-recording-instructions`}>
                 When prompted, choose this tab and enable “Share tab audio”. Microphone audio is included when permitted.
               </p>
             )}
           </div>
-          <aside className="livekit-sidebar">
+          <aside className={`${styles.sidebar} livekit-sidebar`}>
             {isTeacher && (
-              <section className="livekit-roster" aria-label="Class attendance">
-                <h2>Students in class <span>{activeStudents}</span></h2>
-                <p className="livekit-attendance-heading">
-                  Attendance <span>{attendees.length}</span>
+              <section className={`${styles.roster} livekit-roster`} aria-label="Class attendance">
+                <header className={styles.cardHeader}>
+                  <div><p className={styles.kicker}>Live attendance</p><h2>Class roster</h2></div>
+                  <span className={styles.studentCount}>{activeStudents}</span>
+                </header>
+                <p className={`${styles.attendanceHeading} livekit-attendance-heading`}>
+                  Attendance recorded <span>{attendees.length}</span>
                 </p>
                 {attendees.length === 0
                   ? <p className="livekit-attendance-empty">No students have joined this class yet.</p>
@@ -854,13 +882,16 @@ export default function LiveClassRoom() {
                   )}
               </section>
             )}
-            <section className="livekit-chat" aria-label="Class chat">
-              <header><h2>Class chat</h2><p>Messages are visible to class participants.</p></header>
-              <div className="livekit-chat-messages" aria-live="polite">
+            <section className={`${styles.chat} livekit-chat`} aria-label="Class chat">
+              <header className={styles.chatHeader}>
+                <div><p className={styles.kicker}>Keep the conversation going</p><h2>Class chat</h2></div>
+                <span className={styles.chatIcon} aria-hidden="true">↗</span>
+              </header>
+              <div className={`${styles.chatMessages} livekit-chat-messages`} aria-live="polite">
                 {messages.length === 0
                   ? <p className="livekit-chat-empty">No messages yet.</p>
                   : messages.map((message) => (
-                    <article className="livekit-chat-message" key={message.id}>
+                    <article className={`${styles.chatMessage} livekit-chat-message`} key={message.id}>
                       <strong>{message.name}</strong>
                       <p>{message.body}</p>
                       <time dateTime={message.createdAt}>
@@ -869,9 +900,10 @@ export default function LiveClassRoom() {
                     </article>
                   ))}
               </div>
-              {chatError && <p role="alert">{chatError}</p>}
-              <form className="livekit-chat-form" onSubmit={sendMessage}>
+              {chatError && <p className={styles.chatError} role="alert">{chatError}</p>}
+              <form className={`${styles.chatForm} livekit-chat-form`} onSubmit={sendMessage}>
                 <input
+                  className={styles.chatInput}
                   aria-label="Message"
                   value={messageBody}
                   onChange={(event) => setMessageBody(event.target.value)}
@@ -879,7 +911,7 @@ export default function LiveClassRoom() {
                   placeholder="Write a message…"
                   disabled={info.classStatus !== "live"}
                 />
-                <button className="button" type="submit" disabled={!messageBody.trim()}>Send</button>
+                <button className={`button ${styles.sendButton}`} type="submit" disabled={!messageBody.trim()}>Send</button>
               </form>
             </section>
           </aside>
@@ -887,7 +919,7 @@ export default function LiveClassRoom() {
       )}
       {isTeacher && (info.classStatus === "ended" || info.classStatus === "cancelled") &&
         recordedChunkCount > 0 && recordingState !== "ready" && (
-        <div className="livekit-recording-recovery">
+        <div className={`${styles.recovery} livekit-recording-recovery`}>
           <p>A browser recording with {recordedChunkCount} saved chunks is ready to upload.</p>
           {recordingState === "uploading"
             ? <div className="livekit-recording-upload-progress" role="status">
