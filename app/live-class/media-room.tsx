@@ -218,13 +218,26 @@ function VideoView({ stream, label, className, muted = true }: { stream: MediaSt
         logMedia("video playback blocked", { label, error: mediaError(error, "Playback was blocked.") });
       });
     };
+    const onPlaying = () => {
+      setNeedsGesture(false);
+      logMedia("video playback started", {
+        label,
+        width: video.videoWidth,
+        height: video.videoHeight,
+        tracks: describeTracks(stream),
+      });
+    };
     const tracks = stream.getVideoTracks();
     tracks.forEach((track) => track.addEventListener("unmute", playVideo));
     video.addEventListener("loadedmetadata", playVideo);
+    video.addEventListener("loadeddata", playVideo);
+    video.addEventListener("playing", onPlaying);
     playVideo();
     return () => {
       tracks.forEach((track) => track.removeEventListener("unmute", playVideo));
       video.removeEventListener("loadedmetadata", playVideo);
+      video.removeEventListener("loadeddata", playVideo);
+      video.removeEventListener("playing", onPlaying);
       video.srcObject = null;
     };
   }, [label, stream]);

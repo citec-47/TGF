@@ -965,9 +965,8 @@ export default function LiveClassRoom() {
                 {recordingState === "recording" ? ` · ${formatDuration(recordingDuration)}` : ""}
               </span>
             )}
-            {isTeacher && info.classStatus === "live" && (
+            {isTeacher && info.classStatus === "live" && recordingState !== "recording" && (
               <div className={`${styles.recordingControls} livekit-recording-controls`}>
-                {recordingState === "recording" && <p role="status">Recording and saving locally every five seconds.</p>}
                 {recordingState === "saved" && <p role="status">Saved locally. Upload retries automatically.</p>}
                 {recordingState === "ready" && <p role="status">Recording uploaded and confirmed.</p>}
                 {recordingState === "failed" && <p role="status">Recording could not start. Previously saved chunks remain queued.</p>}
