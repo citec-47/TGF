@@ -58,6 +58,7 @@ export function validateAccount(value) {
   const email = typeof value.email === "string" ? value.email.trim().toLowerCase() : "";
   const role = value.role;
   const subsidiary = value.subsidiary;
+  const gender = value.gender;
   if (!fullName || fullName.length > 120 || fullName.length < 2) {
     return { error: "Enter a name between 2 and 120 characters." };
   }
@@ -73,7 +74,18 @@ export function validateAccount(value) {
   if (!SUBSIDIARIES.includes(subsidiary)) {
     return { error: "Choose a valid group company or subsidiary." };
   }
-  return { account: { fullName, email, role, subsidiary } };
+  if (gender !== undefined && !["male", "female", "unspecified"].includes(gender)) {
+    return { error: "Choose a valid gender option." };
+  }
+  return {
+    account: {
+      fullName,
+      email,
+      role,
+      subsidiary,
+      ...(gender === undefined ? {} : { gender }),
+    },
+  };
 }
 
 export function validateAccountReview(value) {

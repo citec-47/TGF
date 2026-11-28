@@ -2600,7 +2600,7 @@ function uploadCourseVideoToCloudinary(file, signature, onProgress) {
         return;
       }
       if (request.status < 200 || request.status >= 300 || result.error) {
-        reject(new Error(result.error?.message || "The video could not be uploaded. Check your connection and try again."));
+        reject(new Error("The video could not be uploaded. Check your connection and try again."));
         return;
       }
       onProgress(100);
@@ -2796,14 +2796,12 @@ async function uploadTeacherProfilePhoto(file) {
   try {
     uploaded = await response.json();
   } catch {
-    throw new Error("Cloudinary returned an unreadable profile photo response.");
+    throw new Error("The photo service returned an unreadable response.");
   }
   if (!response.ok || typeof uploaded.secure_url !== "string" ||
       !uploaded.secure_url.startsWith("https://res.cloudinary.com/") ||
       !uploaded.secure_url.includes(`/${signature.folder}/`)) {
-    throw new Error(typeof uploaded.error?.message === "string"
-      ? uploaded.error.message
-      : "Cloudinary could not upload this profile photo.");
+    throw new Error("The profile photo could not be uploaded.");
   }
   return uploaded.secure_url;
 }
@@ -3126,6 +3124,7 @@ if (registerForm) {
         method: "POST",
         body: JSON.stringify({
           fullName: registerForm.elements.fullName.value.trim(),
+          gender: registerForm.elements.gender.value,
           email: registerForm.elements.email.value.trim(),
           whatsappNumber: registerForm.elements.whatsappNumber.value.trim(),
           password: registerForm.elements.password.value,

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   deletePrivateRecordingAssets,
+  permanentlyDeleteFailedRecording,
   permanentlyDeleteRecordingFromTrash,
   restoreRecordingFromTrash,
 } from "./recording-trash.js";
@@ -82,6 +83,59 @@ test("permanent deletion removes video metadata but preserves the class session"
   assert.equal(result.title, "Software Engineering · Nov 24, 2026");
   assert.ok(statements.some((sql) => sql.includes("DELETE FROM tgf_live_recordings")));
   assert.ok(statements.some((sql) => sql.includes("recording_deleted_at = NULL")));
+  assert.ok(!statements.some((sql) => /^\s*DELETE FROM tgf_live_sessions/i.test(sql)));
+});
+
+test("permanently deletes failed recording assets from both dashboards", async () => {
+  const statements = [];
+  const deletedAssets = [];
+  const pool = {
+    async connect() {
+      return {
+        async query(sql) {
+          statements.push(sql);
+          if (sql.includes("SELECT session.id, session.recording_status")) {
+            return {
+              rows: [{
+                id: sessionId,
+                recording_status: "failed",
+                recording_url: "",
+                cloudinary_public_id: "legacy-video",
+                teacher_id: "teacher-id",
+                title: "Software Engineering · Nov 24, 2026",
+              }],
+            };
+          }
+          if (sql.includes("SELECT part.cloudinary_public_id")) {
+            return {
+              rows: [{ cloudinary_public_id: "partial-video", secure_url: "" }],
+            };
+          }
+          if (sql.includes("SELECT id") && sql.includes("recording_purge_started_at IS NOT NULL")) {
+            return { rows: [{ id: sessionId }] };
+          }
+          return { rows: [] };
+        },
+        release() {},
+      };
+    },
+  };
+
+  const result = await permanentlyDeleteFailedRecording(
+    pool,
+    sessionId,
+    async (publicIds) => deletedAssets.push(...publicIds),
+  );
+
+  assert.deepEqual(deletedAssets, ["legacy-video", "partial-video"]);
+  assert.deepEqual(result, {
+    id: sessionId,
+    title: "Software Engineering · Nov 24, 2026",
+    teacherId: "teacher-id",
+  });
+  assert.ok(statements.some((sql) => sql.includes("DELETE FROM tgf_live_recordings")));
+  assert.ok(statements.some((sql) => sql.includes("recording_hidden_from_admin_at")));
+  assert.ok(statements.some((sql) => sql.includes("recording_hidden_from_teacher_at")));
   assert.ok(!statements.some((sql) => /^\s*DELETE FROM tgf_live_sessions/i.test(sql)));
 });
 

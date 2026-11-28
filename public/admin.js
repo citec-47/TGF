@@ -281,8 +281,8 @@ function renderAdminOverview(overview) {
   recordingStatus.textContent = recordingConfigured ? "Configured" : "Needs setup";
   recordingStatus.className = `admin-integration-status ${recordingConfigured ? "is-configured" : "is-missing"}`;
   recordingDetails.textContent = recordingConfigured
-    ? "Tutor browser recordings can be uploaded to Cloudinary."
-    : "Set CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY, and CLOUDINARY_API_SECRET on the server.";
+    ? "Tutor browser recordings can be uploaded to secure storage."
+    : "Recording storage needs to be configured on the server.";
 
   const pendingPayments = overview.tasks.pendingPayments;
   paymentNavCount.textContent = String(pendingPayments);
@@ -1043,14 +1043,22 @@ function renderUsers() {
     const subsidiary = document.createElement("select");
     subsidiary.setAttribute("aria-label", `Company for ${user.fullName}`);
     addSelectOptions(subsidiary, subsidiaryOptions, user.subsidiary);
+    const gender = document.createElement("select");
+    gender.setAttribute("aria-label", `Gender for ${user.fullName}`);
+    addSelectOptions(gender, [
+      ["unspecified", "Prefer not to say"],
+      ["female", "Female"],
+      ["male", "Male"],
+    ], user.gender || "unspecified");
     const status = makeTag(
       "span",
       user.isFrozen ? "visibility-badge is-hidden" : "visibility-badge",
       user.isFrozen ? "Suspended" : "Active",
     );
-    const save = makeTag("button", "small-action", "Save role");
+    const save = makeTag("button", "small-action", "Save changes");
     save.type = "button";
-    save.addEventListener("click", () => void saveUser(user, role.value, subsidiary.value));
+    save.addEventListener("click", () =>
+      void saveUser(user, role.value, subsidiary.value, user.isFrozen, false, accountMessage, null, gender.value));
     const freeze = makeTag(
       "button",
       "small-action",
@@ -1079,7 +1087,7 @@ function renderUsers() {
     const remove = makeTag("button", "small-action small-action-danger", "Delete");
     remove.type = "button";
     remove.addEventListener("click", () => void deleteUser(user));
-    controls.append(role, subsidiary, status, save, freeze, reset, support, remove);
+    controls.append(role, subsidiary, gender, status, save, freeze, reset, support, remove);
     card.append(details, controls);
     userList.append(card);
   }
@@ -1762,6 +1770,7 @@ async function saveUser(
   resetPassword = false,
   messageTarget = accountMessage,
   password = null,
+  gender = user.gender || "unspecified",
 ) {
   setMessage(messageTarget, `Updating ${user.fullName}…`);
   try {
@@ -1772,6 +1781,7 @@ async function saveUser(
         email: user.email,
         role,
         subsidiary,
+        gender,
         isFrozen,
         resetPassword,
         ...(password ? { password } : {}),
@@ -3156,14 +3166,10 @@ async function uploadPhoto(file, folder = "tgfvp/locations") {
   try {
     uploaded = await response.json();
   } catch {
-    throw new Error("Cloudinary returned an unreadable upload response.");
+    throw new Error("The photo service returned an unreadable upload response.");
   }
   if (!response.ok || typeof uploaded.secure_url !== "string") {
-    const message =
-      typeof uploaded.error?.message === "string"
-        ? uploaded.error.message
-        : "Cloudinary could not upload this photo.";
-    throw new Error(message);
+    throw new Error("The photo could not be uploaded.");
   }
   return uploaded.secure_url;
 }
@@ -3224,6 +3230,7 @@ teacherAccountForm.addEventListener("submit", async (event) => {
       body: JSON.stringify({
         fullName: teacherAccountForm.elements.fullName.value.trim(),
         email: teacherAccountForm.elements.email.value.trim(),
+        gender: teacherAccountForm.elements.gender.value,
         password,
         role: "teacher",
         subsidiary: "tgfvp",
@@ -3322,7 +3329,7 @@ boardPhoto.addEventListener("change", async () => {
   }
   const button = document.querySelector("#save-board-member");
   button.disabled = true;
-  setMessage(boardFormMessage, "Uploading the profile portrait to Cloudinary…");
+  setMessage(boardFormMessage, "Uploading the profile portrait…");
   try {
     boardPhotoUrl.value = await uploadPhoto(file, "tgfvp/board");
     boardPhotoPreview.src = boardPhotoUrl.value;
@@ -3386,7 +3393,7 @@ photoField.addEventListener("change", async () => {
   const uploadButtonText = saveButton.firstChild.textContent;
   saveButton.disabled = true;
   saveButton.firstChild.textContent = "Uploading photo… ";
-  setMessage(formMessage, "Uploading photo to Cloudinary…");
+  setMessage(formMessage, "Uploading photo…");
   try {
     const imageUrl = await uploadPhoto(file);
     imageUrlField.value = imageUrl;
@@ -3469,6 +3476,7 @@ accountForm.addEventListener("submit", async (event) => {
         ...(password ? { password } : {}),
         role: accountForm.elements.role.value,
         subsidiary: accountForm.elements.subsidiary.value,
+        gender: accountForm.elements.gender.value,
       }),
     });
     users.push(result.user);
@@ -3502,7 +3510,7 @@ flyerFile.addEventListener("change", async () => {
     return;
   }
   saveSettingsButton.disabled = true;
-  setMessage(settingsMessage, "Uploading the flyer to Cloudinary…");
+  setMessage(settingsMessage, "Uploading the flyer…");
   try {
     flyerImageUrl.value = await uploadPhoto(file, "tgfvp/flyers");
     flyerPreview.src = flyerImageUrl.value;

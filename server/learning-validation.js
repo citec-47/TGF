@@ -57,7 +57,7 @@ export function validateBoardMember(value, cloudName) {
   }
   const photoUrl = typeof value.photoUrl === "string" ? value.photoUrl : "";
   if (!validImageUrl(photoUrl, cloudName)) {
-    return { error: "Upload a profile image to the configured TGF Cloudinary account." };
+    return { error: "Upload a profile image to the configured image storage." };
   }
   if (typeof value.isActive !== "boolean") {
     return { error: "Choose whether this profile is visible to the public." };
@@ -316,7 +316,7 @@ export function validateTeacherProfile(value, cloudName, teacherId) {
   }
   const photoUrl = typeof value.photoUrl === "string" ? value.photoUrl.trim() : "";
   if (photoUrl && !validTeacherProfilePhotoUrl(photoUrl, cloudName, teacherId)) {
-    return { error: "Choose a profile photo uploaded to your TGF Cloudinary folder." };
+    return { error: "Choose a profile photo uploaded to your account's image storage." };
   }
   return {
     profile: {

@@ -21,6 +21,7 @@ test("records an authorized student joining the session", async () => {
   assert.match(query[0], /participant_role/);
   assert.match(query[0], /'learner'/);
   assert.match(query[0], /ON CONFLICT \(session_id, user_id\)/);
+  assert.match(query[0], /microphone_allowed = FALSE/);
   assert.deepEqual(query[1], ["session-id", "student-id"]);
 });
 

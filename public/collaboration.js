@@ -1301,8 +1301,8 @@
           deleteButton.addEventListener("click", async () => {
             if (!window.confirm(
               state.account?.role === "teacher"
-                ? "Remove this failed entry from My Live Classes? Class history and attendance will be kept."
-                : "Hide this failed recording from General Classes? The tutor will still see it.",
+                ? "Permanently delete this failed recording and its uploaded files? Class history and attendance will be kept."
+                : "Permanently delete this failed recording and its uploaded files from both dashboards? Class history and attendance will be kept.",
             )) return;
             deleteButton.disabled = true;
             try {
@@ -1512,6 +1512,10 @@
       if (event.type?.startsWith("timetable-") || event.type === "timetable-updated") {
         void loadTimetables();
         void loadSchedule();
+      }
+      if (event.type?.startsWith("live-session-")) {
+        void loadSchedule();
+        void loadLiveSessions();
       }
       if (event.type?.startsWith("recording-")) void loadRecordings();
       if (event.type === "notification") {

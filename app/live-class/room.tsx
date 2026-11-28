@@ -10,10 +10,96 @@ import {
   markRecordingQueueFinalizing,
   queueRecordingChunk,
 } from "./recording-queue";
+import LiveMediaRoom, { ParticipantAvatar } from "./media-room";
 import styles from "./room.module.css";
 
 type ClassStatus = "scheduled" | "live" | "ended" | "cancelled";
-type ConnectionStatus = "connecting" | "connected" | "reconnecting" | "failed" | "waiting";
+type ConnectionStatus =
+  | "connecting"
+  | "connected"
+  | "ready"
+  | "reconnecting"
+  | "failed"
+  | "waiting";
+type DashboardRole = "teacher" | "learner";
+type DashboardIconName = "home" | "play" | "calendar" | "book" | "wallet" | "check" | "profile" | "message" | "document";
+
+interface DashboardLink {
+  label: string;
+  href: string;
+  icon: DashboardIconName;
+  active?: boolean;
+}
+
+const teacherLinks: DashboardLink[] = [
+  { label: "Overview", href: "/teacher#teacher-overview", icon: "home" },
+  { label: "Live classes", href: "/teacher#teacher-classes", icon: "play", active: true },
+  { label: "Timetable", href: "/teacher#teacher-weekly-timetable", icon: "calendar" },
+  { label: "My Live Classes", href: "/teacher#teacher-recordings", icon: "play" },
+  { label: "Teaching materials", href: "/teacher#teacher-modules", icon: "book" },
+  { label: "Course content", href: "/teacher#teacher-course-content", icon: "document" },
+  { label: "Capstone reviews", href: "/teacher#teacher-capstones", icon: "check" },
+  { label: "Daily answer reviews", href: "/teacher#teacher-daily-answers", icon: "document" },
+  { label: "Tutor profile", href: "/teacher#teacher-profile", icon: "profile" },
+  { label: "Messages", href: "/teacher#teacher-peer-messages", icon: "message" },
+];
+
+const learnerLinks: DashboardLink[] = [
+  { label: "Overview", href: "/student#student-overview", icon: "home" },
+  { label: "My pathways", href: "/student#student-pathways", icon: "document" },
+  { label: "My course", href: "/student#student-my-course", icon: "book" },
+  { label: "Fees", href: "/student#student-fees", icon: "wallet" },
+  { label: "Live classes", href: "/student#student-upcoming-classes", icon: "play", active: true },
+  { label: "My timetable", href: "/student#student-timetable", icon: "calendar" },
+  { label: "Attendance", href: "/student#student-attendance", icon: "check" },
+  { label: "Recorded classes", href: "/student#student-recordings", icon: "play" },
+  { label: "Messages", href: "/student#student-messages", icon: "message" },
+];
+
+function DashboardIcon({ name }: { name: DashboardIconName }) {
+  return (
+    <svg className="student-nav-icon" viewBox="0 0 24 24" aria-hidden="true">
+      {name === "home" && <path d="m3 10 9-7 9 7v10H5V9.5M9 20v-6h6v6" />}
+      {name === "play" && <><rect x="3" y="5" width="18" height="14" rx="2" /><path d="m10 9 5 3-5 3z" /></>}
+      {name === "calendar" && <><rect x="3" y="4" width="18" height="17" rx="2" /><path d="M8 2v4m8-4v4M3 9h18m-13 4h3m-3 4h6" /></>}
+      {name === "book" && <><path d="M4 5.5A2.5 2.5 0 0 1 6.5 3H20v17H6.5A2.5 2.5 0 0 0 4 22z" /><path d="M4 5.5v16.5m5-15h7m-7 4h7m-7 4h5" /></>}
+      {name === "wallet" && <><rect x="3" y="5" width="18" height="14" rx="2" /><path d="M3 10h18m-13 5h4" /></>}
+      {name === "check" && <><path d="m4 12 5 5L20 6" /><circle cx="12" cy="12" r="9" /></>}
+      {name === "profile" && <><circle cx="12" cy="8" r="3" /><path d="M5 20a7 7 0 0 1 14 0" /></>}
+      {name === "message" && <><path d="M20 11.5a7.5 7.5 0 0 1-7.5 7.5 8 8 0 0 1-3.5-.8L4 20l1.5-4A7.5 7.5 0 1 1 20 11.5Z" /><path d="M8 11h8m-8 3h5" /></>}
+      {name === "document" && <><path d="M5 4h14v16H5z" /><path d="M8 8h8M8 12h8M8 16h5" /></>}
+    </svg>
+  );
+}
+
+function DashboardSidebar({ role }: { role: DashboardRole }) {
+  const isTeacher = role === "teacher";
+  const links = isTeacher ? teacherLinks : learnerLinks;
+
+  return (
+    <aside
+      className="student-sidebar livekit-dashboard-sidebar"
+      aria-label={isTeacher ? "Teacher studio navigation" : "Student learning space navigation"}
+    >
+      <p className="micro-label">{isTeacher ? "Teacher studio" : "Learning space"}</p>
+      <nav>
+        {links.map((link) => (
+          <a
+            key={link.href}
+            className={link.active ? "is-active" : undefined}
+            href={link.href}
+            target="_blank"
+            rel="noopener noreferrer"
+            aria-current={link.active ? "location" : undefined}
+          >
+            <DashboardIcon name={link.icon} />
+            <span>{link.label}</span>
+          </a>
+        ))}
+      </nav>
+    </aside>
+  );
+}
 
 interface JoinResponse {
   role: "teacher" | "learner";
@@ -41,11 +127,13 @@ interface ChatMessage {
   id: string;
   senderId: string;
   name: string;
+  profilePhotoUrl: string;
+  gender: string;
   body: string;
   createdAt: string;
 }
 
-interface CloudinarySignature {
+interface RecordingUploadSignature {
   apiKey: string;
   cloudName: string;
   overwrite: string;
@@ -112,6 +200,7 @@ export default function LiveClassRoom() {
   const [chatError, setChatError] = useState("");
   const [busy, setBusy] = useState(false);
   const [recordingState, setRecordingState] = useState<"idle" | "recording" | "uploading" | "ready" | "failed">("idle");
+  const [periodicUploadState, setPeriodicUploadState] = useState<"idle" | "uploading" | "saved" | "failed">("idle");
   const [recordingProgress, setRecordingProgress] = useState(0);
   const [recordedChunkCount, setRecordedChunkCount] = useState(0);
   const [recordingStopped, setRecordingStopped] = useState(false);
@@ -120,6 +209,9 @@ export default function LiveClassRoom() {
   const recordingPreview = useRef<HTMLVideoElement | null>(null);
   const recorderRef = useRef<MediaRecorder | null>(null);
   const uploadInProgressRef = useRef(false);
+  const uploadRecordingRef = useRef<((finalize?: boolean) => Promise<void>) | null>(null);
+  const periodicUploadTimerRef = useRef<number | null>(null);
+  const periodicUploadTaskRef = useRef<Promise<void> | null>(null);
   const stopRecordingPromiseRef = useRef<Promise<void> | null>(null);
   const recordingStatusUpdateRef = useRef<Promise<void>>(Promise.resolve());
   const captureStreamRef = useRef<MediaStream | null>(null);
@@ -144,8 +236,8 @@ export default function LiveClassRoom() {
           current.roomName === result.roomName) return current;
       return result;
     });
-    if (result.classStatus === "scheduled" && result.role === "learner") {
-      setStatus("waiting");
+    if (result.classStatus === "scheduled") {
+      setStatus(result.role === "learner" ? "waiting" : "ready");
     } else if (result.classStatus === "live") {
       setStatus("connected");
     } else if (result.classStatus === "ended" || result.classStatus === "cancelled") {
@@ -227,6 +319,11 @@ export default function LiveClassRoom() {
               if (active) setNotice(error instanceof Error ? error.message : "Class status could not be refreshed.");
             });
           }
+          if (update.type === "live-session-chat-message") {
+            void refreshChat(info.sessionId).catch((error: unknown) => {
+              if (active) setChatError(error instanceof Error ? error.message : "Chat could not be refreshed.");
+            });
+          }
           if (update.type === "live-session-attendance") void refreshAttendance(info.sessionId);
         } catch (error) {
           logLiveClass("invalid event", { error: String(error) });
@@ -293,6 +390,12 @@ export default function LiveClassRoom() {
   useEffect(() => {
     if (recordingPreview.current) recordingPreview.current.srcObject = captureStream;
   }, [captureStream, info?.classStatus]);
+
+  useEffect(() => () => {
+    if (periodicUploadTimerRef.current !== null) {
+      window.clearInterval(periodicUploadTimerRef.current);
+    }
+  }, []);
 
   useEffect(() => {
     if (recordingState !== "recording") return;
@@ -417,6 +520,18 @@ export default function LiveClassRoom() {
       }, { once: true });
       recorderRef.current = recorder;
       recorder.start(5000);
+      if (periodicUploadTimerRef.current !== null) {
+        window.clearInterval(periodicUploadTimerRef.current);
+      }
+      setPeriodicUploadState("idle");
+      periodicUploadTimerRef.current = window.setInterval(() => {
+        if (periodicUploadTaskRef.current || !uploadRecordingRef.current) return;
+        const task = uploadRecordingRef.current(false);
+        periodicUploadTaskRef.current = task;
+        void task.finally(() => {
+          if (periodicUploadTaskRef.current === task) periodicUploadTaskRef.current = null;
+        });
+      }, 30000);
       setRecordingStopped(false);
       setRecordingState("recording");
       logLiveClass("browser recording started", { sessionId, mimeType: recorder.mimeType });
@@ -445,6 +560,10 @@ export default function LiveClassRoom() {
     const recorder = recorderRef.current;
     const stopTask = (async () => {
       try {
+        if (periodicUploadTimerRef.current !== null) {
+          window.clearInterval(periodicUploadTimerRef.current);
+          periodicUploadTimerRef.current = null;
+        }
         if (recorder?.state === "recording") {
           await new Promise<void>((resolve) => {
             recorder.addEventListener("stop", () => resolve(), { once: true });
@@ -452,6 +571,7 @@ export default function LiveClassRoom() {
           });
         }
         await chunkWritesRef.current;
+        await periodicUploadTaskRef.current;
         const sessionId = info?.sessionId;
         if (recorder && sessionId && nextChunkNumberRef.current > 1) {
           await markRecordingQueueFinalizing(sessionId);
@@ -484,18 +604,23 @@ export default function LiveClassRoom() {
     }
   };
 
-  const uploadRecording = async () => {
+  const uploadRecording = async (finalize = true) => {
     if (!info || uploadInProgressRef.current) return;
     uploadInProgressRef.current = true;
-    setRecordingState("uploading");
-    setRecordingProgress(0);
-    setNotice("");
+    if (finalize) {
+      setRecordingState("uploading");
+      setRecordingProgress(0);
+      setNotice("");
+    } else {
+      setPeriodicUploadState("uploading");
+    }
     try {
+      await chunkWritesRef.current;
       const chunks = await getQueuedRecordingChunks(info.sessionId);
       if (chunks.length === 0) throw new Error("No saved browser recording was found for this class.");
       const mimeType = chunks.find((chunk) => chunk.blob.type)?.blob.type || "video/webm";
       const file = new Blob(chunks.map((chunk) => chunk.blob), { type: mimeType });
-      const signature = await requestJson<CloudinarySignature>(
+      const signature = await requestJson<RecordingUploadSignature>(
         `/api/collaboration/sessions/${encodeURIComponent(info.sessionId)}/recording-signature`,
         { method: "POST" },
       );
@@ -529,46 +654,59 @@ export default function LiveClassRoom() {
               },
             );
             const result = await response.json() as { public_id?: string; done?: boolean; error?: { message?: string } };
-            if (!response.ok) throw new Error(result.error?.message || `Cloudinary upload failed (${response.status}).`);
+            if (!response.ok) throw new Error(`Recording upload failed (${response.status}).`);
             uploadResult = result;
             lastError = null;
             break;
           } catch (error) {
-            lastError = error instanceof Error ? error : new Error("The Cloudinary upload failed.");
+            lastError = error instanceof Error ? error : new Error("The recording upload failed.");
             if (attempt < 4) await new Promise((resolve) => window.setTimeout(resolve, 1000 * (2 ** attempt)));
           }
         }
         if (lastError) throw lastError;
-        setRecordingProgress(Math.round((end / file.size) * 100));
+        if (finalize) setRecordingProgress(Math.round((end / file.size) * 100));
         logLiveClass("recording upload chunk complete", { sessionId: info.sessionId, start, end });
       }
       if (!uploadResult?.done || uploadResult.public_id !== signature.publicId) {
-        throw new Error("Cloudinary did not confirm the completed recording upload.");
+        throw new Error("Recording storage did not confirm the completed upload.");
       }
-      await requestJson(`/api/collaboration/sessions/${encodeURIComponent(info.sessionId)}/recording-complete`, {
-        method: "POST",
-      });
-      await clearRecordingQueueSession(info.sessionId);
-      setRecordingState("ready");
-      setRecordedChunkCount(0);
-      setNotice("Recording uploaded and saved successfully.");
+      if (finalize) {
+        await requestJson(`/api/collaboration/sessions/${encodeURIComponent(info.sessionId)}/recording-complete`, {
+          method: "POST",
+        });
+        await clearRecordingQueueSession(info.sessionId);
+        setRecordingState("ready");
+        setRecordedChunkCount(0);
+        setPeriodicUploadState("saved");
+        setNotice("Recording saved.");
+      } else {
+        setPeriodicUploadState("saved");
+        setNotice((current) => current.startsWith("Automatic save failed") ? "" : current);
+      }
     } catch (error) {
       const reason = error instanceof Error ? error.message : "The recording upload failed.";
-      setRecordingState("failed");
-      setNotice(reason);
-      try {
-        await requestJson(`/api/collaboration/sessions/${encodeURIComponent(info.sessionId)}/recording-failed`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ reason }),
-        });
-      } catch (reportError) {
-        logLiveClass("recording failure could not be reported", { sessionId: info.sessionId, error: String(reportError) });
+      if (finalize) {
+        setRecordingState("failed");
+        setNotice(reason);
+        try {
+          await requestJson(`/api/collaboration/sessions/${encodeURIComponent(info.sessionId)}/recording-failed`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ reason }),
+          });
+        } catch (reportError) {
+          logLiveClass("recording failure could not be reported", { sessionId: info.sessionId, error: String(reportError) });
+        }
+      } else {
+        setPeriodicUploadState("failed");
+        setNotice("Automatic save failed. The recording will be retried in 30 seconds.");
+        logLiveClass("periodic recording upload failed", { sessionId: info.sessionId, error: reason });
       }
     } finally {
       uploadInProgressRef.current = false;
     }
   };
+  uploadRecordingRef.current = uploadRecording;
 
   const toggleBrowserRecording = async () => {
     if (!info || busy) return;
@@ -733,6 +871,7 @@ export default function LiveClassRoom() {
   const statusLabel = {
     connecting: "Connecting",
     connected: "Class live",
+    ready: "Ready to start",
     reconnecting: "Reconnecting",
     failed: "Failed",
     waiting: "Waiting for teacher",
@@ -743,15 +882,20 @@ export default function LiveClassRoom() {
       ? "Cancelled"
       : statusLabel;
   const activeStudents = attendees.filter((attendee) => attendee.isPresent).length;
+  const classroomOpen = info.classStatus === "scheduled" || info.classStatus === "live";
 
   return (
-    <section className={`${styles.room} livekit-room`}>
+    <div className="livekit-dashboard-shell">
+      {(isTeacher || info.role === "learner") && (
+        <DashboardSidebar role={isTeacher ? "teacher" : "learner"} />
+      )}
+      <section className={`${styles.room} livekit-room`}>
       <header className={`${styles.header} livekit-header`}>
         <div className={styles.headerCopy}>
           <p className={styles.kicker}>Live classroom · {displayedStatus}</p>
           <h1>{info.programmeTitle}</h1>
           <p className={styles.subtitle}>
-            Tutor: {info.teacherName} <span aria-hidden="true">·</span> Browser recording classroom
+            Tutor: {info.teacherName} <span aria-hidden="true">·</span> Live classroom
           </p>
         </div>
         <div className={`${styles.headerActions} livekit-header-actions`}>
@@ -779,18 +923,8 @@ export default function LiveClassRoom() {
       {notice && <p className={`${styles.notice} livekit-recording-notice`} role="alert">{notice}</p>}
       {isTeacher && info.classStatus === "scheduled" && (
         <p className={`${styles.setupNote} livekit-recording-setup`}>
-          Starting the class opens the browser recording picker. Choose “This tab” and enable “Share tab audio”; microphone audio is added when permitted.
+          Your camera preview is on. Starting the class opens the browser recording picker; choose “This tab” and enable “Share tab audio.”
         </p>
-      )}
-      {info.classStatus === "scheduled" && !isTeacher && (
-        <div className={`${styles.waitingCard} livekit-waiting-room`} role="status">
-          <span className={`${styles.waitingIcon} livekit-waiting-indicator`} aria-hidden="true">⌛</span>
-          <div>
-            <p className={styles.kicker}>You’re in the right place</p>
-            <strong>Waiting for your tutor</strong>
-            <p>This classroom will update automatically when the tutor starts the session.</p>
-          </div>
-        </div>
       )}
       {info.classStatus === "cancelled" && (
         <div className={`${styles.terminalCard} livekit-waiting-room`}>
@@ -805,32 +939,41 @@ export default function LiveClassRoom() {
         </div>
       )}
 
-      {info.classStatus === "live" && (
+      {classroomOpen && (
         <div className={`${styles.layout} livekit-layout`}>
-          <div className={`${styles.stage} livekit-main-view`} aria-label="Browser recording preview">
-            {isTeacher && captureStream
-              ? <video className={`${styles.preview} livekit-preview-video`} ref={recordingPreview} autoPlay muted playsInline />
-              : (
-                <div className={`${styles.placeholder} livekit-main-placeholder`}>
-                  <span className={styles.stageIcon} aria-hidden="true">{isTeacher ? "◉" : "✦"}</span>
-                  <p className={styles.kicker}>{isTeacher ? "Your class is underway" : "Your tutor is live"}</p>
-                  <strong>{isTeacher ? "Ready when you are" : "Welcome to class"}</strong>
-                  <p>
-                    This classroom records in the tutor’s browser. Live video calling isn’t part of this room; use the class chat to stay in touch.
-                  </p>
-                </div>
-              )}
+          <div className={`${styles.stage} livekit-main-view`} aria-label="Live classroom stage">
+            <LiveMediaRoom
+              sessionId={info.sessionId}
+              role={info.role === "teacher" ? "teacher" : "learner"}
+              classStatus={info.classStatus === "live" ? "live" : "scheduled"}
+              teacherName={info.teacherName}
+            />
+            <video
+              className={styles.capturePreview}
+              ref={recordingPreview}
+              autoPlay
+              muted
+              playsInline
+              aria-hidden="true"
+            />
             {(recordingState === "recording" || info.recordingStatus === "recording") && (
               <span className={`${styles.recordingIndicator} livekit-recording-indicator`} role="status">
                 Recording{isTeacher && recordingState === "recording" ? ` · ${formatDuration(recordingDuration)}` : ""}
               </span>
             )}
-            {isTeacher && (
+            {isTeacher && info.classStatus === "live" && (
               <div className={`${styles.recordingControls} livekit-recording-controls`}>
                 {recordingState === "recording" ? (
-                  <p role="status">Recording this tab continuously. End the class to finish and upload.</p>
-                ) : info.classStatus === "live" &&
-                    recordingState !== "uploading" &&
+                  <p role="status">
+                    {periodicUploadState === "uploading"
+                      ? "Saving recording…"
+                      : periodicUploadState === "failed"
+                        ? "Automatic save failed. It will retry in 30 seconds."
+                        : periodicUploadState === "saved"
+                          ? "Recording saved. Automatic saves continue every 30 seconds."
+                          : "Recording. Automatic saves run every 30 seconds."}
+                  </p>
+                ) : recordingState !== "uploading" &&
                     recordingState !== "ready" &&
                     (info.recordingStatus !== "recording" || recordingState === "failed") &&
                     !recordingStopped &&
@@ -849,7 +992,7 @@ export default function LiveClassRoom() {
                 )}
               </div>
             )}
-            {isTeacher && recordingState === "idle" && recordedChunkCount === 0 && info.recordingStatus !== "recording" && (
+            {isTeacher && info.classStatus === "live" && recordingState === "idle" && recordedChunkCount === 0 && info.recordingStatus !== "recording" && (
               <p className={`${styles.recordingInstructions} livekit-recording-instructions`}>
                 When prompted, choose this tab and enable “Share tab audio”. Microphone audio is included when permitted.
               </p>
@@ -889,14 +1032,23 @@ export default function LiveClassRoom() {
               </header>
               <div className={`${styles.chatMessages} livekit-chat-messages`} aria-live="polite">
                 {messages.length === 0
-                  ? <p className="livekit-chat-empty">No messages yet.</p>
+                  ? <p className="livekit-chat-empty">
+                    {info.classStatus === "scheduled" ? "Chat opens when the class starts." : "No messages yet."}
+                  </p>
                   : messages.map((message) => (
                     <article className={`${styles.chatMessage} livekit-chat-message`} key={message.id}>
-                      <strong>{message.name}</strong>
-                      <p>{message.body}</p>
-                      <time dateTime={message.createdAt}>
-                        {new Date(message.createdAt).toLocaleTimeString()}
-                      </time>
+                      <ParticipantAvatar
+                        name={message.name}
+                        photoUrl={message.profilePhotoUrl}
+                        gender={message.gender}
+                      />
+                      <div>
+                        <strong>{message.name}</strong>
+                        <p>{message.body}</p>
+                        <time dateTime={message.createdAt}>
+                          {new Date(message.createdAt).toLocaleTimeString()}
+                        </time>
+                      </div>
                     </article>
                   ))}
               </div>
@@ -931,6 +1083,7 @@ export default function LiveClassRoom() {
             </button>}
         </div>
       )}
-    </section>
+      </section>
+    </div>
   );
 }

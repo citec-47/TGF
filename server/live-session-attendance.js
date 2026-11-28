@@ -13,6 +13,7 @@ export async function markLiveSessionParticipantJoined(pool, sessionId, particip
      WHERE session.id = $1 AND session.ended_at IS NULL
      ON CONFLICT (session_id, user_id) DO UPDATE SET
        current_joined_at = COALESCE(tgf_live_session_attendance.current_joined_at, NOW()),
+       microphone_allowed = FALSE,
        last_left_at = NULL
      RETURNING user_id`,
     [sessionId, participantId],

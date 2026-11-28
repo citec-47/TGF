@@ -72,7 +72,7 @@ export function validateSiteSettings(value, cloudName) {
     }
   }
   if (!validCloudinaryImage) {
-    return { error: "Upload the flyer to the configured TGF Cloudinary account first." };
+    return { error: "Upload the flyer to the configured image storage first." };
   }
   if (
     typeof flyerDateText !== "string" ||

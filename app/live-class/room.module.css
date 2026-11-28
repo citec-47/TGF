@@ -111,7 +111,8 @@
   background: #98a096;
 }
 
-.room .status_connected > span {
+.room .status_connected > span,
+.room .status_ready > span {
   background: #3eaa75;
   box-shadow: 0 0 0 4px rgba(62, 170, 117, 0.13);
 }
@@ -215,6 +216,7 @@
 .room .stage {
   position: relative;
   display: grid;
+  width: 100%;
   min-width: 0;
   min-height: 460px;
   aspect-ratio: 16 / 9;
@@ -308,11 +310,12 @@
 
 .room .recordingControls {
   position: absolute;
-  right: 16px;
-  bottom: 16px;
-  left: 16px;
+  top: 58px;
+  right: 14px;
+  left: auto;
   z-index: 2;
   display: flex;
+  max-width: min(320px, calc(100% - 28px));
   align-items: center;
   justify-content: center;
   flex-wrap: wrap;
@@ -348,8 +351,8 @@
 .room .recordingInstructions {
   position: absolute;
   right: 20px;
-  bottom: 18px;
   left: 20px;
+  bottom: 18px;
   margin: 0;
   color: rgba(255, 255, 255, 0.72);
   font-size: 0.78rem;
@@ -732,10 +735,9 @@
     left: 12px;
   }
 
-  .recordingControls {
+  .room .recordingControls {
+    top: 50px;
     right: 10px;
-    bottom: 10px;
-    left: 10px;
     padding: 10px;
   }
 
@@ -807,5 +809,391 @@
   .room .status_connecting > span,
   .room .status_reconnecting > span {
     animation: none;
+  }
+}
+
+.room .capturePreview {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.room .mediaClassroom {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) auto auto;
+  overflow: hidden;
+  background: #111719;
+  color: #fff;
+  text-align: left;
+}
+
+.room .mediaMain {
+  position: relative;
+  display: grid;
+  min-width: 0;
+  min-height: 0;
+  place-items: center;
+  overflow: hidden;
+  background:
+    radial-gradient(ellipse at 50% 35%, rgba(78, 101, 80, 0.25), transparent 48%),
+    #111719;
+}
+
+.room .mediaMainVideo {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  background: #111;
+}
+
+.room .mediaPlaceholder {
+  display: flex;
+  max-width: 360px;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 24px;
+  color: rgba(255, 255, 255, 0.74);
+  text-align: center;
+}
+
+.room .mediaPlaceholder strong {
+  color: #fff;
+  font-size: 1.15rem;
+}
+
+.room .mediaAvatar {
+  display: grid;
+  width: 92px;
+  height: 92px;
+  place-items: center;
+  overflow: hidden;
+  border-radius: 50%;
+}
+
+.room .participantAvatar,
+.room .participantInitial {
+  display: grid;
+  width: 42px;
+  height: 42px;
+  flex: 0 0 42px;
+  place-items: center;
+  overflow: hidden;
+  border-radius: 50%;
+  background: #e7eee8;
+  color: #365646;
+  font-size: 1rem;
+  font-weight: 800;
+  object-fit: cover;
+}
+
+.room .mediaAvatar .participantAvatar {
+  width: 92px;
+  height: 92px;
+  flex-basis: 92px;
+}
+
+.room .screenShareBadge {
+  position: absolute;
+  bottom: 14px;
+  left: 14px;
+  max-width: calc(100% - 28px);
+  overflow: hidden;
+  padding: 7px 10px;
+  border-radius: 8px;
+  background: rgba(18, 24, 21, 0.78);
+  color: #fff;
+  font-size: 0.72rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.room .mediaControls {
+  z-index: 3;
+  display: flex;
+  min-width: 0;
+  min-height: 74px;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 8px 12px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  background: #1b2225;
+}
+
+.room .mediaControlButton {
+  display: flex;
+  min-width: 74px;
+  min-height: 58px;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  gap: 4px;
+  padding: 6px 9px;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.9);
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.67rem;
+  font-weight: 650;
+  transition: background-color 140ms ease, color 140ms ease;
+}
+
+.room .mediaControlButton svg {
+  width: 22px;
+  height: 22px;
+}
+
+.room .mediaControlButton:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.12);
+  color: #fff;
+}
+
+.room .mediaControlButton:focus-visible,
+.room .participantMeta button:focus-visible {
+  outline: 2px solid #8cc9ff;
+  outline-offset: 2px;
+}
+
+.room .mediaControlButton:disabled {
+  cursor: not-allowed;
+  opacity: 0.58;
+}
+
+.room .mediaControlOff {
+  color: #ff887d;
+}
+
+.room .mediaControlActive {
+  background: rgba(66, 153, 111, 0.24);
+  color: #9ce0b7;
+}
+
+.room .mediaConnection {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  z-index: 2;
+  padding: 6px 9px;
+  border-radius: 999px;
+  background: rgba(20, 29, 25, 0.78);
+  color: rgba(255, 255, 255, 0.84);
+  font-size: 0.66rem;
+}
+
+.room .participantRail {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  overflow: hidden;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  background: #151c1f;
+}
+
+.room .participantRailHeader {
+  display: flex;
+  min-height: 38px;
+  align-items: center;
+  gap: 10px;
+  padding: 5px 12px;
+  color: #fff;
+  font-size: 0.74rem;
+}
+
+.room .participantRailHeader span {
+  display: grid;
+  min-width: 22px;
+  height: 22px;
+  place-items: center;
+  border-radius: 7px;
+  background: rgba(255, 255, 255, 0.1);
+  font-size: 0.65rem;
+}
+
+.room .participantSearch {
+  width: min(220px, 40%);
+  min-width: 100px;
+  margin-left: auto;
+  padding: 6px 9px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.08);
+  color: #fff;
+  font: inherit;
+  font-size: 0.68rem;
+}
+
+.room .participantSearch::placeholder {
+  color: rgba(255, 255, 255, 0.58);
+}
+
+.room .participantList {
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  gap: 8px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 0 10px 9px;
+  scrollbar-color: #536064 transparent;
+  scrollbar-width: thin;
+}
+
+.room .participantCard {
+  flex: 0 0 150px;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 9px;
+  background: rgba(255, 255, 255, 0.055);
+}
+
+.room .participantVideo {
+  position: relative;
+  display: grid;
+  min-height: 56px;
+  aspect-ratio: 16 / 9;
+  place-items: center;
+  overflow: hidden;
+  background: #121719;
+}
+
+.room .participantVideoElement {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.room .participantVideo > .participantAvatar,
+.room .participantVideo > .participantInitial {
+  width: 38px;
+  height: 38px;
+  flex-basis: 38px;
+}
+
+.room .participantMic {
+  position: absolute;
+  right: 5px;
+  bottom: 5px;
+  padding: 3px 5px;
+  border-radius: 5px;
+  background: rgba(16, 20, 18, 0.76);
+  color: #fff;
+  font-size: 0.56rem;
+}
+
+.room .participantMeta {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px;
+  padding: 5px 6px;
+}
+
+.room .participantMeta strong {
+  min-width: 0;
+  overflow: hidden;
+  color: #fff;
+  font-size: 0.62rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.room .participantMeta button {
+  min-height: 25px;
+  flex: 0 0 auto;
+  padding: 4px 6px;
+  border: 1px solid rgba(255, 255, 255, 0.17);
+  border-radius: 7px;
+  background: rgba(255, 255, 255, 0.11);
+  color: #fff;
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.57rem;
+}
+
+.room .participantEmpty {
+  margin: 10px;
+  color: rgba(255, 255, 255, 0.68);
+  font-size: 0.67rem;
+  line-height: 1.4;
+}
+
+.room .mediaError {
+  max-width: 180px;
+  margin: 0;
+  color: #ffd2c9;
+  font-size: 0.65rem;
+  line-height: 1.3;
+}
+
+.room .chatMessage {
+  display: flex;
+  width: 100%;
+  align-items: flex-start;
+  gap: 9px;
+}
+
+.room .chatMessage > div {
+  min-width: 0;
+  flex: 1;
+}
+
+.room .chatMessage .participantAvatar,
+.room .chatMessage .participantInitial {
+  width: 30px;
+  height: 30px;
+  flex-basis: 30px;
+  font-size: 0.75rem;
+}
+
+@media (max-width: 680px) {
+  .room .mediaClassroom {
+    grid-template-rows: minmax(0, 1fr) auto auto;
+  }
+
+  .room .participantCard {
+    flex-basis: 128px;
+  }
+
+  .room .mediaControls {
+    min-height: 66px;
+    gap: 2px;
+    padding: 5px 4px;
+  }
+
+  .room .mediaControlButton {
+    min-width: 60px;
+    min-height: 52px;
+    padding: 4px;
+    font-size: 0.58rem;
+  }
+
+  .room .mediaControlButton svg {
+    width: 20px;
+    height: 20px;
+  }
+
+  .room .participantRailHeader {
+    min-height: 34px;
+  }
+
+  .room .participantSearch {
+    width: 46%;
+    min-width: 80px;
+  }
+
+  .room .mediaError {
+    max-width: 100%;
+    flex-basis: 100%;
+    text-align: center;
   }
 }

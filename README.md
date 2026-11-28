@@ -11,7 +11,7 @@ workspaces and administrator controls.
 
 1. Install Node.js 20 or later.
 2. Copy `.env.example` to `.env` and set private PostgreSQL, administrator,
-   session and Cloudinary credentials. Never commit `.env`.
+   session and file-storage credentials. Never commit `.env`.
 3. Run `npm install`, then `npm run dev`.
 4. Open `http://localhost:3000` for the public site, `/student` to register or
    access student courses, `/teacher` for the teacher studio, `/portal` for
@@ -33,9 +33,8 @@ and contact enquiries use Website submissions.
 Students self-register, enroll in available programmes, and unlock released
 modules in order by completing the preceding modules. Teachers can schedule
 classes for their assigned modules and draw on a persisted, shared classroom
-whiteboard. Class meeting URLs are supplied by administrators or teachers and
-open in the configured external meeting service; embedded video conferencing
-is not included.
+whiteboard. Live classes support real-time browser video, audio, tutor screen
+sharing, class chat, and tutor-controlled student microphones.
 Learner registration collects an international-format WhatsApp number. Once an
 administrator approves an account, learners can sign in with their existing
 email and password. Administrators can click the number in the account list to
@@ -47,8 +46,8 @@ dashboards use signed, HTTP-only, twelve-hour session cookies. User sessions
 check the account status against PostgreSQL, so frozen or deleted accounts lose
 access. Temporary passwords must be changed at first sign-in. Student
 registration grants learner access only; teaching and administrative access
-must be assigned by an administrator. Photo uploads are signed server-side;
-the Cloudinary secret is never sent to the browser. Whiteboard contents and
+must be assigned by an administrator. File uploads are signed server-side;
+storage credentials are never sent to the browser. Whiteboard contents and
 learner module completion are checked and saved server-side.
 
 The supplied programme flyer and TGF Group organizational chart are stored in
@@ -57,7 +56,7 @@ reference materials; it does not invent missing contact details, staff
 profiles, vacancy listings or subsidiary URLs. Corporate career applications,
 community registrations and contact enquiries are stored in PostgreSQL and
 reviewed from the administrator's Website submissions inbox. Career CVs are
-stored as authenticated Cloudinary assets and can only be downloaded by an
+stored in private file storage and can only be downloaded by an
 authorized administrator. Deleting a career application also removes its CV.
 Newsletter preferences are recorded, but automated newsletters and email
 receipts are not configured.
@@ -102,22 +101,20 @@ page, a daily answer form for questions and activities, and the module
 capstone at the end of Week 4. Daily answers are submitted to the assigned
 teacher for approval or feedback; this review does not change module access.
 
-## Browser-recorded live classes
+## Live classes
 
-Live classes provide class status, attendance, and chat; they do not include a
-remote video-conferencing service. The tutor's browser captures a selected tab
-or screen and microphone using `getDisplayMedia` and `MediaRecorder`, saves
-chunks in IndexedDB, then uploads the recording directly to Cloudinary using a
-short-lived server signature. Cloudinary credentials remain server-only.
+Live classes use the self-hosted mediasoup service for real-time video, audio,
+and tutor screen sharing. Students join muted; tutors can search participants
+and control microphones individually or for the whole class. Chat messages
+include profile photos or gender-based fallback avatars. Only tutors record:
+the tutor's browser captures a selected tab or screen and microphone, saves
+chunks in IndexedDB, and automatically uploads a recording snapshot every
+30 seconds. The final snapshot is uploaded and saved when the class ends.
 
-Run `npm run db:migrate` before starting classes. Configure
-`CLOUDINARY_CLOUD_NAME`, `CLOUDINARY_API_KEY`, and `CLOUDINARY_API_SECRET` on the
-server. Tutors should use current Chrome or Edge over HTTPS, choose "This tab",
-and enable "Share tab audio" when prompted. Screen/tab recording depends on the
-tutor's browser, device, and connection; tab-audio capture is not supported in
-every browser. Cloudinary plan limits vary; see
-https://cloudinary.com/pricing.
-
-Set `NEXT_PUBLIC_LIVE_CLASS_DEBUG=true` temporarily for browser recording and
-class-status logs. See [docs/LIVE_CLASS_SETUP.md](./docs/LIVE_CLASS_SETUP.md)
-for setup and deployment.
+Run `npm run db:migrate` before starting classes. Enable
+`MEDIASOUP_ENABLED=true` and configure the media server's public IP and
+reachable UDP port range in production. Set the recording-storage credentials
+on the server; do not expose them with `NEXT_PUBLIC_` prefixes. Browser capture
+requires the tutor to authorize screen/tab sharing and works best in current
+Chrome or Edge over HTTPS. See [docs/LIVE_CLASS_SETUP.md](./docs/LIVE_CLASS_SETUP.md)
+for network, browser, and deployment requirements.

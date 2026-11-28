@@ -96,6 +96,7 @@ interface UserRow {
   email: string;
   password_hash: string;
   role: string;
+  gender?: string;
   subsidiary: string;
   is_frozen: boolean;
   must_change_password: boolean;
@@ -553,6 +554,7 @@ function serializeUser(user: UserRow) {
     fullName: user.full_name,
     email: user.email,
     role: user.role,
+    gender: user.gender || "unspecified",
     subsidiary: user.subsidiary,
     isFrozen: user.is_frozen,
     mustChangePassword: user.must_change_password,
@@ -691,7 +693,7 @@ async function listUsers(): Promise<Response> {
     await ensureSchema();
     const result = await pool.query<UserRow>(
       `SELECT id, full_name, email, password_hash, role, subsidiary,
-              is_frozen, must_change_password, account_status, rejection_reason,
+              gender, is_frozen, must_change_password, account_status, rejection_reason,
               whatsapp_number, created_at
        FROM tgf_users ORDER BY lower(full_name), lower(email)`,
     );
@@ -1470,16 +1472,17 @@ async function createUser(request: Request): Promise<Response> {
     const temporaryPassword = hasCustomPassword ? null : password;
     const result = await pool.query<UserRow>(
       `INSERT INTO tgf_users
-         (full_name, email, password_hash, role, subsidiary, is_frozen, must_change_password)
-       VALUES ($1, $2, $3, $4, $5, FALSE, $6)
+         (full_name, email, password_hash, role, subsidiary, gender, is_frozen, must_change_password)
+       VALUES ($1, $2, $3, $4, $5, $6, FALSE, $7)
        RETURNING id, full_name, email, password_hash, role, subsidiary,
-                 is_frozen, must_change_password, created_at`,
+                 gender, is_frozen, must_change_password, created_at`,
       [
         validation.account.fullName,
         validation.account.email,
         hashPassword(password),
         validation.account.role,
         validation.account.subsidiary,
+        validation.account.gender || "unspecified",
         !hasCustomPassword,
       ],
     );
@@ -1561,12 +1564,13 @@ async function updateUser(request: Request, id: string): Promise<Response> {
       const result = await client.query<UserRow>(
         `UPDATE tgf_users
          SET full_name = $2, email = $3, role = $4, subsidiary = $5, is_frozen = $6,
+             gender = COALESCE($10, gender),
              password_hash = COALESCE($7, password_hash),
              must_change_password = CASE WHEN $8 THEN TRUE WHEN $9 THEN FALSE ELSE must_change_password END,
              updated_at = NOW()
          WHERE id = $1
          RETURNING id, full_name, email, password_hash, role, subsidiary,
-                   is_frozen, must_change_password, created_at`,
+                   gender, is_frozen, must_change_password, created_at`,
         [
           id,
           validation.account.fullName,
@@ -1577,6 +1581,7 @@ async function updateUser(request: Request, id: string): Promise<Response> {
           passwordToHash ? hashPassword(passwordToHash) : null,
           resetPassword,
           Boolean(password),
+          validation.account.gender || null,
         ],
       );
       await client.query("COMMIT");
@@ -2357,6 +2362,10 @@ async function registerLearner(request: Request): Promise<Response> {
     const fullName = typeof body.fullName === "string" ? body.fullName.trim() : "";
     const email = typeof body.email === "string" ? body.email.trim().toLowerCase() : "";
     const password = typeof body.password === "string" ? body.password : "";
+    const gender = body.gender === undefined ? "unspecified" : body.gender;
+    if (typeof gender !== "string" || !["male", "female", "unspecified"].includes(gender)) {
+      return jsonResponse(400, { error: "Choose a valid gender option." });
+    }
     const whatsappResult = normalizeWhatsAppNumber(body.whatsappNumber);
     if ("error" in whatsappResult) {
       return jsonResponse(400, { error: whatsappResult.error });
@@ -2376,11 +2385,11 @@ async function registerLearner(request: Request): Promise<Response> {
       await client.query("BEGIN");
       const result = await client.query<{ id: string }>(
         `INSERT INTO tgf_users
-           (full_name, email, password_hash, whatsapp_number, role, subsidiary, is_frozen,
+           (full_name, email, password_hash, whatsapp_number, role, subsidiary, gender, is_frozen,
             must_change_password, account_status)
-         VALUES ($1, $2, $3, $4, 'learner', 'tgfvp', FALSE, FALSE, 'pending')
+         VALUES ($1, $2, $3, $4, 'learner', 'tgfvp', $5, FALSE, FALSE, 'pending')
          RETURNING id`,
-        [fullName, email, hashPassword(password), whatsappResult.whatsappNumber],
+        [fullName, email, hashPassword(password), whatsappResult.whatsappNumber, gender],
       );
       id = result.rows[0].id;
       await client.query(
@@ -2652,7 +2661,7 @@ const MAX_COURSE_VIDEO_UPLOAD_BYTES = 100 * 1024 * 1024;
 
 function cloudinaryParameterSignature(parameters: Record<string, string>): string {
   const apiSecret = process.env.CLOUDINARY_API_SECRET;
-  if (!apiSecret) throw new Error("Private Cloudinary uploads are not configured.");
+  if (!apiSecret) throw new Error("Private file uploads are not configured.");
   const signatureBase = Object.keys(parameters)
     .filter((key) => parameters[key] !== "")
     .sort()
@@ -2796,12 +2805,9 @@ async function uploadPrivateCloudinaryFile(
   }
   if (!response.ok) {
     const errorCode = `http_${response.status}`;
-    safeLogFailure("Private Cloudinary upload", Object.assign(new Error("Cloudinary rejected the upload"), { code: errorCode }));
-    const cloudinaryMessage = typeof result.error?.message === "string" ? result.error.message : "";
+    safeLogFailure("Private file upload", Object.assign(new Error("The storage service rejected the upload"), { code: errorCode }));
     throw Object.assign(new Error(
-      cloudinaryMessage
-        ? `Cloudinary could not store this file: ${cloudinaryMessage}`
-        : "Cloudinary could not store this file. Check the Cloudinary configuration and try again.",
+      "The storage service could not store this file. Check the server configuration and try again.",
     ), { status: 503 });
   }
   const metadataErrors = getPrivateCloudinaryUploadMismatches(result, publicId, file.size);
@@ -2814,7 +2820,7 @@ async function uploadPrivateCloudinaryFile(
       await destroyPrivateCloudinaryAsset(publicId);
     }
     throw Object.assign(new Error(
-      `Cloudinary file verification failed for: ${metadataErrors.join(", ")}. Please try again.`,
+      `The uploaded file could not be verified (${metadataErrors.join(", ")}). Please try again.`,
     ), { status: 503 });
   }
   return { publicId, format };
@@ -8732,7 +8738,7 @@ async function handleRequest(request: Request): Promise<Response> {
       }
       if (!isCloudinaryConfigured()) {
         return jsonResponse(503, {
-          error: "Photo uploads are not configured. Set the Cloudinary environment variables first.",
+          error: "Photo uploads are not configured on the server.",
         });
       }
       let uploadRequest: Record<string, unknown>;

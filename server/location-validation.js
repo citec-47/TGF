@@ -51,7 +51,7 @@ export function validateLocation(value, cloudName) {
     imageUrl.length > 1000 ||
     (imageUrl !== "" && !isCloudinaryImageUrl(imageUrl, cloudName))
   ) {
-    return { error: "Choose a photo uploaded to the configured Cloudinary account." };
+    return { error: "Choose a photo uploaded to the configured image storage." };
   }
 
   return {
@@ -71,7 +71,7 @@ export function createCloudinarySignature({ folder, timestamp, uploadPreset, api
     typeof uploadPreset !== "string" ||
     typeof apiSecret !== "string"
   ) {
-    throw new TypeError("Cloudinary signing parameters are invalid.");
+    throw new TypeError("Image storage signing parameters are invalid.");
   }
 
   const parameters = {

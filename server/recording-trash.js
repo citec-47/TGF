@@ -50,7 +50,7 @@ export async function deletePrivateRecordingAssets(
   const uniquePublicIds = [...new Set(publicIds.filter((publicId) => typeof publicId === "string" && publicId))];
   if (!uniquePublicIds.length) return;
   if (!cloudName || !apiKey || !apiSecret) {
-    throw new Error("Cloudinary is not configured for permanent recording deletion.");
+    throw new Error("Recording storage is not configured for permanent deletion.");
   }
 
   client.config({ cloud_name: cloudName, api_key: apiKey, api_secret: apiSecret, secure: true });
@@ -61,7 +61,7 @@ export async function deletePrivateRecordingAssets(
       invalidate: true,
     });
     if (result?.result !== "ok" && result?.result !== "not found") {
-      throw new Error("Cloudinary could not permanently delete a recording video.");
+      throw new Error("A recording video could not be permanently deleted.");
     }
   }
 }
@@ -170,6 +170,102 @@ export async function permanentlyDeleteRecordingFromTrash(
     return { id: session.id, title: session.title };
   } catch (error) {
     if (transactionOpen) await finalizeClient.query("ROLLBACK");
+    throw error;
+  } finally {
+    finalizeClient.release();
+  }
+}
+
+export async function permanentlyDeleteFailedRecording(
+  pool,
+  sessionId,
+  deleteAssets = deletePrivateRecordingAssets,
+) {
+  const client = await pool.connect();
+  let session;
+  let publicIds;
+  try {
+    await client.query("BEGIN");
+    const result = await client.query(
+      `SELECT session.id, session.recording_status, session.recording_url,
+              session.cloudinary_public_id, session.teacher_id,
+              programme.title || ' · ' || to_char(session.class_date, 'Mon DD, YYYY') AS title
+       FROM tgf_live_sessions session
+       JOIN tgf_programmes programme ON programme.id = session.programme_id
+       WHERE session.id = $1 AND session.recording_status = 'failed'
+       FOR UPDATE OF session`,
+      [sessionId],
+    );
+    session = result.rows[0];
+    if (!session) {
+      await client.query("COMMIT");
+      return null;
+    }
+
+    const partsResult = await client.query(
+      `SELECT part.cloudinary_public_id, part.secure_url
+       FROM tgf_live_recordings recording
+       JOIN tgf_live_recording_parts part ON part.recording_id = recording.id
+       WHERE recording.session_id = $1`,
+      [sessionId],
+    );
+    publicIds = [];
+    if (session.recording_url && !session.cloudinary_public_id) {
+      throw new Error("The failed recording asset identifier is missing.");
+    }
+    if (session.cloudinary_public_id) publicIds.push(session.cloudinary_public_id);
+    for (const part of partsResult.rows) {
+      if (part.secure_url && !part.cloudinary_public_id) {
+        throw new Error("A failed recording part asset identifier is missing.");
+      }
+      if (part.cloudinary_public_id) publicIds.push(part.cloudinary_public_id);
+    }
+    await client.query(
+      `UPDATE tgf_live_sessions
+       SET recording_purge_started_at = COALESCE(recording_purge_started_at, NOW())
+       WHERE id = $1`,
+      [sessionId],
+    );
+    await client.query("COMMIT");
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
+
+  await deleteAssets(publicIds);
+
+  const finalizeClient = await pool.connect();
+  try {
+    await finalizeClient.query("BEGIN");
+    const current = await finalizeClient.query(
+      `SELECT id
+       FROM tgf_live_sessions
+       WHERE id = $1 AND recording_status = 'failed'
+         AND recording_purge_started_at IS NOT NULL
+       FOR UPDATE`,
+      [sessionId],
+    );
+    if (!current.rows[0]) {
+      await finalizeClient.query("COMMIT");
+      return null;
+    }
+    await finalizeClient.query("DELETE FROM tgf_live_recordings WHERE session_id = $1", [sessionId]);
+    await finalizeClient.query(
+      `UPDATE tgf_live_sessions
+       SET recording_url = '', cloudinary_public_id = '', recording_error = '',
+           recording_hidden_from_admin_at = COALESCE(recording_hidden_from_admin_at, NOW()),
+           recording_hidden_from_teacher_at = COALESCE(recording_hidden_from_teacher_at, NOW()),
+           recording_deleted_at = NULL, recording_deleted_by = NULL,
+           recording_purge_started_at = NULL, updated_at = NOW()
+       WHERE id = $1`,
+      [sessionId],
+    );
+    await finalizeClient.query("COMMIT");
+    return { id: session.id, title: session.title, teacherId: session.teacher_id };
+  } catch (error) {
+    await finalizeClient.query("ROLLBACK");
     throw error;
   } finally {
     finalizeClient.release();

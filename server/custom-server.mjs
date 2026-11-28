@@ -3,6 +3,7 @@ import http from "node:http";
 import next from "next";
 import pg from "pg";
 import { purgeExpiredRecordingTrash } from "./recording-trash.js";
+import { createLiveClassSfu } from "./live-class-sfu.js";
 
 const dev = process.env.NODE_ENV !== "production";
 const hostname = process.env.HOSTNAME || "0.0.0.0";
@@ -21,6 +22,10 @@ await app.prepare();
 const server = http.createServer((request, response) => {
   void handle(request, response);
 });
+const liveClassSfu = await createLiveClassSfu(server, pool);
+if (!liveClassSfu) {
+  console.info("Live-class media is disabled. Set MEDIASOUP_ENABLED=true to enable it.");
+}
 
 let recordingTrashCleanupRunning = false;
 const recordingTrashCleanup = setInterval(async () => {
